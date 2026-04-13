@@ -1,0 +1,32 @@
+# Go
+*.exe
+*.test
+*.out
+/server
+/bin/
+
+# 环境变量（包含密钥，不提交）
+.env
+.env.local
+
+# 依赖
+vendor/
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# 日志
+*.log
+logs/
+
+# 构建产物
+dist/
+frontend/dist/
+frontend/node_modules/
+
+# 数据卷（Docker）
+postgres_data/
+redis_data/
+minio_data/

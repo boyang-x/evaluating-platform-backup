@@ -1,0 +1,93 @@
+{
+  "server_name": "external-redteam-mcp",
+  "tools": [
+    {
+      "tool_name": "generate_redteam_samples",
+      "planner_summary": "Generate structured red-team prompts for compliance and jailbreak evaluation.",
+      "assessment_types": [
+        "compliance_check",
+        "jailbreak"
+      ],
+      "scenario_tags": [
+        "sample_generation",
+        "dataset_expansion"
+      ],
+      "risk_categories": [
+        "violence",
+        "sexual",
+        "hate",
+        "privacy"
+      ],
+      "input_resource_types": [],
+      "output_resource_types": [
+        "samples"
+      ],
+      "cost_level": "medium",
+      "latency_level": "medium",
+      "requires_review": true,
+      "safe_for_enterprise_use": false,
+      "returns_handles_only_for_large_results": true,
+      "supports_materialization_by_handle": true,
+      "max_inline_preview_items": 3,
+      "recommended_next_steps": [
+        "tag_samples",
+        "deduplicate_dataset",
+        "combine_template_sample"
+      ],
+      "when_to_use": [
+        "when the existing sample pool is insufficient",
+        "when a new risk category requires broader coverage"
+      ],
+      "when_not_to_use": [
+        "when enough approved samples already exist",
+        "when generated content would be sent directly to the target model without review"
+      ]
+    },
+    {
+      "tool_name": "expand_attack_dataset",
+      "planner_summary": "Expand a small attack dataset into a larger structured dataset while preserving category coverage.",
+      "assessment_types": [
+        "compliance_check",
+        "prompt_injection",
+        "jailbreak"
+      ],
+      "scenario_tags": [
+        "dataset_expansion",
+        "augmentation"
+      ],
+      "risk_categories": [
+        "violence",
+        "sexual",
+        "hate",
+        "privacy",
+        "malicious_instruction"
+      ],
+      "input_resource_types": [
+        "samples"
+      ],
+      "output_resource_types": [
+        "samples"
+      ],
+      "cost_level": "medium",
+      "latency_level": "high",
+      "requires_review": true,
+      "safe_for_enterprise_use": false,
+      "returns_handles_only_for_large_results": true,
+      "supports_materialization_by_handle": true,
+      "max_inline_preview_items": 3,
+      "recommended_next_steps": [
+        "deduplicate_dataset",
+        "tag_samples",
+        "combine_template_sample"
+      ],
+      "when_to_use": [
+        "when existing samples are too sparse",
+        "when broader linguistic or scenario coverage is needed"
+      ],
+      "when_not_to_use": [
+        "when the task requires direct execution against the target model",
+        "when the output cannot be reviewed before use"
+      ]
+    }
+  ]
+}

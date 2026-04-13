@@ -1,0 +1,49 @@
+server:
+  port: 8080
+  mode: debug   # debug | release
+
+llm:
+  provider: openai           # openai-compatible
+  base_url: "https://api.deepseek.com/v1"
+  api_key: "${LLM_API_KEY}"
+  model: "deepseek-chat"
+  max_tokens: 4096
+  temperature: 0.7
+
+database:
+  dsn: "host=postgres user=postgres password=postgres dbname=evaluating_platform port=5432 sslmode=disable client_encoding=UTF8"
+  max_conns: 20
+  min_conns: 2
+  migrate_on_start: true   # 启动时自动执行迁移
+
+redis:
+  addr: "redis:6379"
+  password: ""
+  db: 0
+
+storage:
+  endpoint: "minio:9000"
+  access_key: "${MINIO_ACCESS_KEY}"
+  secret_key: "${MINIO_SECRET_KEY}"
+  bucket: "evaluating-platform"
+  use_ssl: false
+
+agent:
+  max_iterations: 20
+  timeout_seconds: 300
+  tool_timeout_seconds: 15
+
+auth:
+  jwt_secret: "${JWT_SECRET}"
+  token_expiry_hours: 24
+
+billing:
+  mode: prepaid              # prepaid | postpaid
+  expert_share_rate: 0.3    # 专家获得调用费用的 30%
+
+mcp:
+  port: 18080               # MCP SSE Server 监听端口
+
+crypto:
+  master_key: "${CRYPTO_MASTER_KEY}"  # 32字节 hex 编码的 AES-256 密钥
+  key_id: "v1"

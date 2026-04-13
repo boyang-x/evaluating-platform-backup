@@ -1,0 +1,7 @@
+.env
+.env.local
+artifacts
+server.err.log
+server.out.log
+*.exe
+*.exe~

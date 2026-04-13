@@ -1,0 +1,8 @@
+       datname       
+---------------------
+ postgres
+ evaluating_platform
+ template1
+ template0
+(4 ÐÐ¼ÇÂ¼)
+

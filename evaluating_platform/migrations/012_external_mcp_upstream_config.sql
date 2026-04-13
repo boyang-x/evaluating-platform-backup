@@ -1,0 +1,5 @@
+ALTER TABLE external_mcp_servers
+    ADD COLUMN IF NOT EXISTS upstream_base_url TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS upstream_api_key TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS upstream_model VARCHAR(255) NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS upstream_timeout_seconds INTEGER NOT NULL DEFAULT 0;
