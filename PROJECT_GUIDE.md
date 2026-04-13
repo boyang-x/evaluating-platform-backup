@@ -122,6 +122,20 @@ docker compose up -d --build
 Invoke-WebRequest -UseBasicParsing http://localhost:8080/api/v1/health
 ```
 
+## 4.1 代码仓库状态
+
+当前顶层工作目录 `C:\Users\wangboyang\Desktop\evaluating_platform` 已经正式初始化为 Git 仓库，并连接到私有备份仓库：
+
+- `origin = https://github.com/boyang-x/evaluating-platform-backup.git`
+- 默认分支：`main`
+
+建议后续开发方式：
+
+1. 日常开发继续在当前原目录中进行，而不是在 `evaluating_platform__publish_snapshot` 临时副本中开发。
+2. `main` 作为稳定基线。
+3. 每次较大的实验性改动先新建分支，例如 `feature/qagent-skill`。
+4. 当改动不理想时，优先通过 Git 分支或提交回退，而不是手工覆盖目录。
+
 ## 5. 当前关键设计约束
 
 ### 5.1 关于编排 LLM

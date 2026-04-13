@@ -12,6 +12,7 @@ Thumbs.db
 **/.env.local
 
 *.exe
+*.exe~
 *.log
 *.tmp
 *.out
