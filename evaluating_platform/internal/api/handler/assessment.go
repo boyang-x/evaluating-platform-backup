@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -22,53 +23,46 @@ import (
 	"evaluating_platform/internal/model"
 	"evaluating_platform/internal/report"
 	"evaluating_platform/internal/repository"
-	"evaluating_platform/internal/workflow"
 	"evaluating_platform/pkg/llm"
 	"evaluating_platform/pkg/logger"
 )
 
 // AssessmentHandler 评估任务处理器
 type AssessmentHandler struct {
-	engine           *agent.Engine
-	workflowExecutor *workflow.Executor
-	reporter         *report.Generator
-	llmClient        *llm.Client
-	pool             *mcptools.ConnectorPool
-	assessmentRepo   *repository.AssessmentRepository
-	reportRepo       *repository.ReportRepository
-	billingService   *billing.Service
-	assetRepo        *repository.AssetRepository
-	logHub           *hub.LogHub
-	jwtSecret        string
-	cancelFuncs      sync.Map // map[assessmentID string] -> context.CancelFunc
+	engine         *agent.Engine
+	reporter       *report.Generator
+	llmClient      *llm.Client
+	pool           *mcptools.ConnectorPool
+	assessmentRepo *repository.AssessmentRepository
+	reportRepo     *repository.ReportRepository
+	billingService *billing.Service
+	logHub         *hub.LogHub
+	jwtSecret      string
+	cancelFuncs    sync.Map // map[assessmentID string] -> context.CancelFunc
 }
 
 // NewAssessmentHandler 创建处理器
 func NewAssessmentHandler(
 	engine *agent.Engine,
-	workflowExecutor *workflow.Executor,
 	reporter *report.Generator,
 	llmClient *llm.Client,
 	pool *mcptools.ConnectorPool,
 	assessmentRepo *repository.AssessmentRepository,
 	reportRepo *repository.ReportRepository,
 	billingService *billing.Service,
-	assetRepo *repository.AssetRepository,
 	logHub *hub.LogHub,
 	jwtSecret string,
 ) *AssessmentHandler {
 	return &AssessmentHandler{
-		engine:           engine,
-		workflowExecutor: workflowExecutor,
-		reporter:         reporter,
-		llmClient:        llmClient,
-		pool:             pool,
-		assessmentRepo:   assessmentRepo,
-		reportRepo:       reportRepo,
-		billingService:   billingService,
-		assetRepo:        assetRepo,
-		logHub:           logHub,
-		jwtSecret:        jwtSecret,
+		engine:         engine,
+		reporter:       reporter,
+		llmClient:      llmClient,
+		pool:           pool,
+		assessmentRepo: assessmentRepo,
+		reportRepo:     reportRepo,
+		billingService: billingService,
+		logHub:         logHub,
+		jwtSecret:      jwtSecret,
 	}
 }
 
@@ -101,7 +95,7 @@ func (h *AssessmentHandler) Create(c *gin.Context) {
 	if h.billingService != nil {
 		if err := h.billingService.CheckSufficientBalance(ctx, userID); err != nil {
 			c.JSON(http.StatusPaymentRequired, gin.H{
-				"error": "余额不足，无法发起评估",
+				"error":  "余额不足，无法发起评估",
 				"detail": err.Error(),
 			})
 			return
@@ -175,28 +169,10 @@ func (h *AssessmentHandler) runAssessment(assessment *model.Assessment, req Crea
 		h.engine.SetHub(h.logHub)
 	}
 
-	// 执行评估：关联了 workflow 类型模板时走 DAG 路径，否则走 ReAct 路径
+	// 执行评估：统一走 ReAct 路径，已移除 workflow DAG 专门执行链路
 	var result *agent.RunResult
 	var err error
-	var billingAssetID *uuid.UUID
-	var billingExpertID *uuid.UUID
-
-	if assessment.TemplateID != nil && h.workflowExecutor != nil && h.assetRepo != nil {
-		asset, assetErr := h.assetRepo.GetByID(ctx, *assessment.TemplateID)
-		if assetErr == nil && asset.Type == model.AssetTypeWorkflow {
-			result, err = h.workflowExecutor.Run(ctx, assessment.ID.String(), asset.Config)
-			if err == nil {
-				_ = h.assetRepo.IncrCallCount(ctx, asset.ID)
-				billingAssetID = &asset.ID
-				billingExpertID = &asset.ExpertID
-			}
-		} else {
-			// 模板不存在或非 workflow 类型，回退到 ReAct 路径
-			result, err = h.engine.Run(ctx, assessment.ID.String(), req.Goal)
-		}
-	} else {
-		result, err = h.engine.Run(ctx, assessment.ID.String(), req.Goal)
-	}
+	result, err = h.engine.Run(ctx, assessment.ID.String(), req.Goal)
 
 	if err != nil {
 		logger.Error("assessment failed", map[string]interface{}{
@@ -262,7 +238,7 @@ func (h *AssessmentHandler) runAssessment(assessment *model.Assessment, req Crea
 		}
 		if err := h.billingService.ProcessAssessmentBilling(
 			ctx, assessment.UserID, assessment.ID, toolCalls, result.TokensUsed,
-			billingAssetID, billingExpertID,
+			nil, nil,
 		); err != nil {
 			// 计费失败仅记录告警，不影响评估完成状态
 			logger.Error("billing failed (non-fatal)", map[string]interface{}{
@@ -372,6 +348,59 @@ func (h *AssessmentHandler) Cancel(c *gin.Context) {
 
 // StreamLogs SSE 实时日志流
 // GET /api/v1/assessments/:id/stream?token=<jwt>
+// Delete 删除已结束的评估任务
+// DELETE /api/v1/assessments/:id
+func (h *AssessmentHandler) Delete(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid assessment id"})
+		return
+	}
+
+	userID, _ := uuid.Parse(c.GetString("user_id"))
+	if err := h.assessmentRepo.Delete(c.Request.Context(), id, userID); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrAssessmentNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "assessment not found"})
+		case errors.Is(err, repository.ErrAssessmentActive):
+			c.JSON(http.StatusConflict, gin.H{"error": "assessment is still running, cancel it before deleting"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "delete assessment failed"})
+		}
+		return
+	}
+
+	logger.Info("assessment deleted", map[string]interface{}{
+		"assessment_id": id,
+		"user_id":       userID,
+	})
+	c.JSON(http.StatusOK, gin.H{"message": "assessment deleted"})
+}
+
+// DeleteAll 删除当前用户全部已结束的评估记录。
+// DELETE /api/v1/assessments
+func (h *AssessmentHandler) DeleteAll(c *gin.Context) {
+	userID, _ := uuid.Parse(c.GetString("user_id"))
+
+	result, err := h.assessmentRepo.DeleteAll(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "delete assessments failed"})
+		return
+	}
+
+	logger.Info("assessments bulk deleted", map[string]interface{}{
+		"user_id":       userID,
+		"deleted_count": result.DeletedCount,
+		"active_count":  result.ActiveCount,
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":       "assessments deleted",
+		"deleted_count": result.DeletedCount,
+		"active_count":  result.ActiveCount,
+	})
+}
+
 func (h *AssessmentHandler) StreamLogs(c *gin.Context) {
 	assessmentID := c.Param("id")
 	if _, err := uuid.Parse(assessmentID); err != nil {

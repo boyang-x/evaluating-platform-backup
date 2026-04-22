@@ -40,6 +40,12 @@ export interface CreateAssessmentData {
   description?: string
 }
 
+export interface DeleteAllAssessmentsResult {
+  deleted_count: number
+  active_count: number
+  message: string
+}
+
 export const assessmentService = {
   async create(data: CreateAssessmentData): Promise<{ assessment_id: string; status: string }> {
     const res = await api.post('/assessments', data)
@@ -58,6 +64,15 @@ export const assessmentService = {
 
   async cancel(id: string): Promise<void> {
     await api.post(`/assessments/${id}/cancel`)
+  },
+
+  async delete(id: string): Promise<void> {
+    await api.delete(`/assessments/${id}`)
+  },
+
+  async deleteAll(): Promise<DeleteAllAssessmentsResult> {
+    const res = await api.delete('/assessments')
+    return res.data
   },
 
   streamLogs(

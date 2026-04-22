@@ -84,6 +84,11 @@ func (h *AuxiliaryLLMHandler) UpdateConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	req.BaseURL = normalizeLLMBaseURL(req.BaseURL)
+	if err := validateOpenAICompatibleProviderConfig(req.BaseURL, req.Model); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	userID, _ := uuid.Parse(c.GetString("user_id"))
 
@@ -129,6 +134,11 @@ func (h *AuxiliaryLLMHandler) UpdateConfig(c *gin.Context) {
 func (h *AuxiliaryLLMHandler) TestConnection(c *gin.Context) {
 	var req TestConnectionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.BaseURL = normalizeLLMBaseURL(req.BaseURL)
+	if err := validateOpenAICompatibleProviderConfig(req.BaseURL, req.Model); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

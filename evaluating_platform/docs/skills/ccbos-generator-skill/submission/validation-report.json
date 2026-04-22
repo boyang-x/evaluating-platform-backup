@@ -1,0 +1,13 @@
+{
+  "skill_name": "ccbos-classical-chinese-skill",
+  "skill_version": "1.2.0",
+  "tested_at": "2026-04-15T12:00:00Z",
+  "execution_mode": "code",
+  "all_passed": true,
+  "test_cases": 2,
+  "notes": [
+    "Self-check validates payload_dataset structure.",
+    "When no Skill-specific API key is configured, the skill uses a deterministic fallback rewrite.",
+    "Production use should fill SKILL_LLM_* values from the imported Skill config page."
+  ]
+}

@@ -44,6 +44,10 @@ billing:
 mcp:
   port: 18080               # MCP SSE Server 监听端口
 
+skill:
+  runner_base_url: "http://skill_runner:8091"
+  runner_timeout_seconds: 300
+
 crypto:
   master_key: "${CRYPTO_MASTER_KEY}"  # 32字节 hex 编码的 AES-256 密钥
   key_id: "v1"

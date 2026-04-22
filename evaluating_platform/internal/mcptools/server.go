@@ -8,6 +8,7 @@ import (
 
 	"evaluating_platform/internal/repository"
 	"evaluating_platform/internal/sample"
+	skillpkg "evaluating_platform/internal/skill"
 	"evaluating_platform/pkg/storage"
 )
 
@@ -23,6 +24,7 @@ func NewMCPServer(
 	minioClient *storage.MinIOClient,
 	reportRepo *repository.ReportRepository,
 	sessionStore *SessionStore,
+	skillService *skillpkg.Service,
 ) *server.MCPServer {
 	s := server.NewMCPServer("ai-security-tools", "1.0.0")
 	if sessionStore == nil {
@@ -40,7 +42,7 @@ func NewMCPServer(
 		registerGetTemplate(s, tplRepo)
 	}
 	if sampleRepo != nil && tplRepo != nil {
-		registerRecommendResources(s, sampleRepo, composedRepo, tplRepo)
+		registerRecommendResources(s, sampleRepo, composedRepo, tplRepo, skillService)
 	}
 
 	if tplRepo != nil && loader != nil {
@@ -48,6 +50,10 @@ func NewMCPServer(
 	}
 	if composedRepo != nil && composedLoader != nil {
 		registerLoadComposedAttack(s, composedLoader, sessionStore)
+	}
+	if skillService != nil {
+		registerPreviewSkill(s, skillService)
+		registerRunGeneratorSkill(s, skillService, loader, sessionStore)
 	}
 	if auxLLMRepo != nil {
 		registerEnhancePayloads(s, auxLLMRepo, sessionStore)

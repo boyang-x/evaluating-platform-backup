@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,6 +18,7 @@ import (
 	"evaluating_platform/internal/api/middleware"
 	"evaluating_platform/internal/billing"
 	chatpkg "evaluating_platform/internal/chat"
+	"evaluating_platform/internal/crypto"
 	"evaluating_platform/internal/detector"
 	"evaluating_platform/internal/externalmcp"
 	"evaluating_platform/internal/hub"
@@ -24,7 +26,7 @@ import (
 	"evaluating_platform/internal/report"
 	"evaluating_platform/internal/repository"
 	"evaluating_platform/internal/sample"
-	"evaluating_platform/internal/workflow"
+	skillpkg "evaluating_platform/internal/skill"
 	"evaluating_platform/pkg/config"
 	"evaluating_platform/pkg/db"
 	"evaluating_platform/pkg/llm"
@@ -101,6 +103,15 @@ func main() {
 		if err := db.MigrateUp(ctx, pgPool, "migrations/012_external_mcp_upstream_config.sql"); err != nil {
 			log.Fatalf("[FATAL] run external mcp upstream config migration: %v", err)
 		}
+		if err := db.MigrateUp(ctx, pgPool, "migrations/013_skills.sql"); err != nil {
+			log.Fatalf("[FATAL] run skills migration: %v", err)
+		}
+		if err := db.MigrateUp(ctx, pgPool, "migrations/014_skill_status_disabled.sql"); err != nil {
+			log.Fatalf("[FATAL] run skill status disabled migration: %v", err)
+		}
+		if err := db.MigrateUp(ctx, pgPool, "migrations/015_skill_config_values.sql"); err != nil {
+			log.Fatalf("[FATAL] run skill config values migration: %v", err)
+		}
 		logger.Info("database migration completed")
 	}
 
@@ -145,6 +156,21 @@ func main() {
 	reportRepo := repository.NewReportRepository(pgPool)
 	externalMCPServerRepo := repository.NewExternalMCPServerRepository(pgPool)
 	externalMCPToolRepo := repository.NewExternalMCPToolRepository(pgPool)
+	skillRepo := repository.NewSkillRepository(pgPool)
+	skillVersionRepo := repository.NewSkillVersionRepository(pgPool)
+	skillRunRepo := repository.NewSkillRunRepository(pgPool)
+	skillConfigRepo := repository.NewSkillConfigValueRepository(pgPool)
+
+	var keyStore *crypto.KeyStore
+	if strings.TrimSpace(cfg.Crypto.MasterKey) == "" {
+		logger.Warn("crypto.master_key not set; skill dynamic config storage is disabled")
+	} else {
+		ks, err := crypto.NewKeyStore(cfg.Crypto)
+		if err != nil {
+			log.Fatalf("[FATAL] init crypto keystore: %v", err)
+		}
+		keyStore = ks
+	}
 
 	// ── 5.2 初始化样本管理组件 ─────────────────────────────────
 	var sampleManager *sample.Manager
@@ -159,9 +185,24 @@ func main() {
 		logger.Info("sample manager/loader initialized")
 	}
 
+	skillRunnerClient := skillpkg.NewRunnerClient(
+		cfg.Skill.RunnerBaseURL,
+		time.Duration(cfg.Skill.RunnerTimeoutSeconds)*time.Second,
+	)
+	skillService := skillpkg.NewService(
+		skillRepo,
+		skillVersionRepo,
+		skillRunRepo,
+		skillConfigRepo,
+		targetLLMRepo,
+		minioClient,
+		skillRunnerClient,
+		keyStore,
+	)
+
 	// ── 6. 创建并启动 MCP Server（goroutine 中运行）──────────
 	sessionStore := mcptools.NewSessionStore(30 * time.Minute)
-	mcpServer := mcptools.NewMCPServer(sampleLoader, composedAttackLoader, tplRepo, sampleRepo, composedAttackRepo, auxLLMRepo, targetLLMRepo, minioClient, reportRepo, sessionStore)
+	mcpServer := mcptools.NewMCPServer(sampleLoader, composedAttackLoader, tplRepo, sampleRepo, composedAttackRepo, auxLLMRepo, targetLLMRepo, minioClient, reportRepo, sessionStore, skillService)
 	externalMCPManager := externalmcp.NewManager(externalMCPServerRepo, externalMCPToolRepo, mcpServer)
 	mcptools.RegisterCCBOSRewriteTools(mcpServer, sampleLoader, sessionStore, assessmentRepo, targetLLMRepo, externalMCPServerRepo, externalMCPManager)
 	go func() {
@@ -226,7 +267,6 @@ func main() {
 	// ── 8. 初始化核心组件 ──────────────────────────────────────
 	toolTimeout := time.Duration(cfg.Agent.ToolTimeoutSeconds) * time.Second
 	agentEngine := agent.NewEngine(llmClient, mcpClient, cfg.Agent.MaxIterations, toolTimeout)
-	workflowExecutor := workflow.NewExecutor(mcpClient)
 	reportGenerator := report.NewGenerator(llmClient, minioClient)
 
 	// ── 8.1 初始化 LogHub（SSE 实时日志广播）────────────────────
@@ -247,16 +287,18 @@ func main() {
 	// ── 11. 初始化 Handler ─────────────────────────────────────
 	authHandler := handler.NewAuthHandler(cfg.Auth.JWTSecret, userRepo)
 	assessHandler := handler.NewAssessmentHandler(
-		agentEngine, workflowExecutor, reportGenerator, llmClient, pool,
-		assessmentRepo, reportRepo, billingService, assetRepo,
+		agentEngine, reportGenerator, llmClient, pool,
+		assessmentRepo, reportRepo, billingService,
 		logHub, cfg.Auth.JWTSecret,
 	)
 	reportHandler := handler.NewReportHandler(reportRepo, minioClient)
 	assetHandler := handler.NewAssetHandler(assetRepo)
 	billingHandler := handler.NewBillingHandler(billingService)
-	adminHandler := handler.NewAdminHandler(userRepo, assetRepo, assessmentRepo, billingRepo)
-	chatManager := chatpkg.NewManager(chatRepo, assessmentRepo, orchLLMRepo, targetLLMRepo, agentEngine, reportGenerator, reportRepo, pool, logHub, billingService)
+	adminHandler := handler.NewAdminHandler(userRepo, assessmentRepo, billingRepo)
+	chatManager := chatpkg.NewManager(chatRepo, assessmentRepo, orchLLMRepo, targetLLMRepo, externalMCPServerRepo, agentEngine, reportGenerator, reportRepo, pool, logHub, billingService, skillService)
 	chatHandler := handler.NewChatHandler(chatManager, chatRepo)
+	welcomeCapabilitiesService := chatpkg.NewWelcomeCapabilitiesService(sampleRepo, composedAttackRepo, tplRepo, externalMCPServerRepo, skillService)
+	enterpriseWelcomeHandler := handler.NewEnterpriseWelcomeHandler(welcomeCapabilitiesService)
 
 	// 攻击样本 & 模版 Handler
 	var sampleHandler *handler.AttackSampleHandler
@@ -274,6 +316,7 @@ func main() {
 	orchLLMHandler := handler.NewOrchestrationLLMHandler(orchLLMRepo)
 	targetLLMHandler := handler.NewTargetLLMHandler(targetLLMRepo)
 	externalMCPHandler := handler.NewExternalMCPHandler(externalMCPServerRepo, externalMCPToolRepo, externalMCPManager)
+	skillHandler := handler.NewSkillHandler(skillService)
 
 	// 检测引擎（即使 sampleManager 为 nil 也可创建，只是样本/评测包功能不可用）
 	detEngine := detector.NewEngine(llmClient, sampleLoader, tplRepo)
@@ -367,8 +410,10 @@ func main() {
 		// 评估任务
 		auth.POST("/assessments", assessHandler.Create)
 		auth.GET("/assessments", assessHandler.List)
+		auth.DELETE("/assessments", assessHandler.DeleteAll)
 		auth.GET("/assessments/:id", assessHandler.Get)
 		auth.POST("/assessments/:id/cancel", assessHandler.Cancel)
+		auth.DELETE("/assessments/:id", assessHandler.Delete)
 
 		// 报告
 		auth.GET("/reports/:id", reportHandler.Get)
@@ -395,6 +440,9 @@ func main() {
 			enterprise.GET("/target-llm/config", targetLLMHandler.GetConfig)
 			enterprise.PUT("/target-llm/config", targetLLMHandler.UpdateConfig)
 			enterprise.POST("/target-llm/test", targetLLMHandler.TestConnection)
+
+			enterprise.GET("/enterprise/welcome-capabilities", enterpriseWelcomeHandler.ListCapabilities)
+			enterprise.GET("/enterprise/skills/:id/launch", skillHandler.GetLaunchDocument)
 		}
 
 		// 专家/管理员专属
@@ -454,7 +502,21 @@ func main() {
 			expert.DELETE("/external-mcp-servers/:id", externalMCPHandler.DeleteServer)
 			expert.POST("/external-mcp-servers/:id/test", externalMCPHandler.TestServer)
 			expert.POST("/external-mcp-servers/:id/sync", externalMCPHandler.SyncServer)
+			expert.POST("/external-mcp-servers/:id/disconnect", externalMCPHandler.DisconnectServer)
 			expert.GET("/external-mcp-servers/:id/tools", externalMCPHandler.ListTools)
+
+			expert.POST("/skills/import", skillHandler.Import)
+			expert.GET("/skills", skillHandler.List)
+			expert.GET("/skills/:id", skillHandler.Get)
+			expert.GET("/skills/:id/config", skillHandler.GetConfig)
+			expert.PUT("/skills/:id/config", skillHandler.UpdateConfig)
+			expert.POST("/skills/:id/versions/:version_id/self-test", skillHandler.SelfTest)
+			expert.POST("/skills/:id/publish", skillHandler.Publish)
+			expert.POST("/skills/:id/disable", skillHandler.Disable)
+			expert.POST("/skills/:id/enable", skillHandler.Enable)
+			expert.POST("/skills/:id/deprecate", skillHandler.Deprecate)
+			expert.DELETE("/skills/:id", skillHandler.Delete)
+			expert.GET("/skills/:id/runs", skillHandler.ListRuns)
 		}
 
 		// 管理员专属路由
@@ -464,9 +526,6 @@ func main() {
 			adminGroup.GET("/users", adminHandler.ListUsers)
 			adminGroup.PUT("/users/:id/role", adminHandler.UpdateUserRole)
 			adminGroup.PUT("/users/:id/active", adminHandler.SetUserActive)
-			adminGroup.GET("/assets/pending", adminHandler.ListPendingAssets)
-			adminGroup.PUT("/assets/:id/approve", adminHandler.ApproveAsset)
-			adminGroup.PUT("/assets/:id/reject", adminHandler.RejectAsset)
 			adminGroup.GET("/stats", adminHandler.GetStats)
 		}
 

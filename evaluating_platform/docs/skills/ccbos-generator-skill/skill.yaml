@@ -1,0 +1,75 @@
+manifest_version: "1.0"
+skill_type: generator_skill
+name: ccbos-classical-chinese-skill
+display_name: CCBOS Classical Chinese Skill
+version: "1.2.0"
+description: >
+  Consume expert-portal samples and rewrite them into classical-Chinese attack prompts,
+  returning a standardized payload_dataset for downstream execution.
+category: classical_chinese_rewrite
+capability_profile: classical_chinese_sample_rewriter
+input_source_mode: platform_resource_only
+assessment_types:
+  - jailbreak
+  - prompt_injection
+  - goal_hijacking
+  - compliance_check
+config_schema:
+  - key: SKILL_LLM_API_KEY
+    label: Skill LLM API Key
+    type: text
+    required: true
+    description: Required OpenAI-compatible API key. Fill it in after import from the Skill config page.
+    env_name: SKILL_LLM_API_KEY
+    secret: true
+  - key: SKILL_LLM_BASE_URL
+    label: Skill LLM Base URL
+    type: text
+    required: false
+    description: Optional OpenAI-compatible base URL configured from the post-import Skill settings page.
+    env_name: SKILL_LLM_BASE_URL
+    default: https://api.deepseek.com/v1
+    placeholder: https://api.deepseek.com/v1
+  - key: SKILL_LLM_MODEL
+    label: Skill LLM Model
+    type: text
+    required: false
+    description: Optional upstream model name configured from the post-import Skill settings page.
+    env_name: SKILL_LLM_MODEL
+    default: deepseek-chat
+    placeholder: deepseek-chat
+permissions:
+  direct_target_access: false
+  target_access_purpose: none
+  direct_mcp_access: false
+  platform_tool_access: false
+  network_access: true
+  code_execution: true
+  file_read_access: true
+  file_write_access: true
+  returns_sensitive_payload_inline: false
+  can_generate_final_report: false
+metadata:
+  capability_profile: classical_chinese_sample_rewriter
+  accepted_resource_types:
+    - sample
+  accepted_resource_modes:
+    - sample_rewrite
+  minimum_items: 1
+  maximum_items: 20
+execution:
+  runtime: python3.12
+  entrypoint: runtime/main.py
+  self_test_entrypoint: runtime/selfcheck.py
+  timeout_seconds: 180
+embedded_resources:
+  embedded_dataset_id: ""
+  summary:
+    mode: platform_sample_only
+    supports_platform_samples: true
+    supports_embedded_dataset: false
+    notes:
+      - This skill expects source_samples from the platform.
+      - Runtime LLM credentials can be filled in the imported Skill settings UI.
+      - Self-test runs are offline and do not depend on upstream LLM connectivity.
+      - Published use reads only the Skill-specific config values, not the platform-global LLM env.

@@ -5,6 +5,7 @@ package agent
 
 import (
 	"testing"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -113,5 +114,15 @@ func TestExtractSeverity_NonStringSeverity(t *testing.T) {
 	got := extractSeverity(`{"severity":3}`)
 	if got != "" {
 		t.Errorf("expected empty string when severity is non-string, got %q", got)
+	}
+}
+
+func TestTimeoutForTool_RunGeneratorSkillUsesLongerTimeout(t *testing.T) {
+	executor := &Executor{toolTimeout: 15 * time.Second}
+
+	got := executor.timeoutForTool("run_generator_skill")
+
+	if got != 5*time.Minute {
+		t.Fatalf("expected run_generator_skill timeout to be 5m, got %v", got)
 	}
 }

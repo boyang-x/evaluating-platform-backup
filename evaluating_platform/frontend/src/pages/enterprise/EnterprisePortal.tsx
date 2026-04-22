@@ -22,6 +22,7 @@ import { BillingPage } from './BillingPage'
 import { MarketPlace } from './MarketPlace'
 import { Settings } from './Settings'
 import { ChatPage } from './ChatPage'
+import { EnterpriseSkillOpen } from './EnterpriseSkillOpen'
 import { useAuth } from '../../context/AuthContext'
 import { billingService } from '../../services/billing'
 
@@ -49,6 +50,11 @@ export function EnterprisePortal() {
   useEffect(() => {
     billingService.getBalance().then(r => setBalance(r.balance)).catch(() => {})
   }, [])
+
+  const skillOpenMatch = location.pathname.match(/^\/enterprise\/skills\/([^/]+)\/open$/)
+  if (skillOpenMatch) {
+    return <EnterpriseSkillOpen skillId={skillOpenMatch[1]} />
+  }
 
   const userMenu = [
     {

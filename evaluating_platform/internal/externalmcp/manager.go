@@ -173,6 +173,9 @@ func (m *Manager) SyncServer(ctx context.Context, serverID uuid.UUID) error {
 func (m *Manager) DisableServer(ctx context.Context, serverID uuid.UUID) error {
 	m.unregisterProxyTools(serverID)
 	m.closeRuntime(serverID)
+	if err := m.toolRepo.DeleteByServer(ctx, serverID); err != nil {
+		return err
+	}
 	return m.serverRepo.UpdateStatus(ctx, serverID, "disabled", "", nil)
 }
 

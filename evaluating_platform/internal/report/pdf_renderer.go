@@ -157,9 +157,10 @@ func (r *PDFRenderer) renderTitlePage(pdf *fpdf.Fpdf, font string, report *Stand
 
 	pdf.Ln(15)
 	cr, cg, cb := severityColor(report.RiskLevel)
+	safetyScore := SafetyScoreFromRiskScore(float64(report.RiskScore))
 	pdf.SetFont(font, "B", 16)
 	pdf.SetTextColor(cr, cg, cb)
-	pdf.CellFormat(0, 10, sanitizePDFText(fmt.Sprintf("Risk Level: %s  |  Score: %d/100", riskLevelLabel(report.RiskLevel), report.RiskScore)), "", 1, "C", false, 0, "")
+	pdf.CellFormat(0, 10, sanitizePDFText(fmt.Sprintf("Risk Level: %s  |  Security Score: %d/100", riskLevelLabel(report.RiskLevel), safetyScore)), "", 1, "C", false, 0, "")
 }
 
 func (r *PDFRenderer) renderSummarySection(pdf *fpdf.Fpdf, font string, report *StandardReport) {
@@ -185,8 +186,9 @@ func (r *PDFRenderer) renderSummarySection(pdf *fpdf.Fpdf, font string, report *
 }
 
 func (r *PDFRenderer) renderRiskSection(pdf *fpdf.Fpdf, font string, report *StandardReport) {
-	r.sectionTitle(pdf, font, "2. Risk Level & Score")
+	r.sectionTitle(pdf, font, "2. Risk Level & Security Score")
 	cr, cg, cb := severityColor(report.RiskLevel)
+	safetyScore := SafetyScoreFromRiskScore(float64(report.RiskScore))
 
 	pdf.SetFont(font, "B", 12)
 	pdf.SetTextColor(cr, cg, cb)
@@ -195,9 +197,9 @@ func (r *PDFRenderer) renderRiskSection(pdf *fpdf.Fpdf, font string, report *Sta
 
 	pdf.SetTextColor(40, 40, 40)
 	pdf.SetFont(font, "B", 12)
-	pdf.CellFormat(40, 8, "Risk Score:", "", 0, "L", false, 0, "")
+	pdf.CellFormat(40, 8, "Security Score:", "", 0, "L", false, 0, "")
 	pdf.SetFont(font, "", 12)
-	pdf.CellFormat(0, 8, fmt.Sprintf("%d / 100", report.RiskScore), "", 1, "L", false, 0, "")
+	pdf.CellFormat(0, 8, fmt.Sprintf("%d / 100", safetyScore), "", 1, "L", false, 0, "")
 	pdf.Ln(4)
 }
 
@@ -300,7 +302,7 @@ func (r *PDFRenderer) renderMetricsSection(pdf *fpdf.Fpdf, font string, report *
 		{"Total Tests", fmt.Sprintf("%d", m.TotalTests)},
 		{"Successful Attacks", fmt.Sprintf("%d", m.SuccessCount)},
 		{"Success Rate", fmt.Sprintf("%.1f%%", m.SuccessRate*100)},
-		{"Risk Score", fmt.Sprintf("%d / 100", m.RiskScore)},
+		{"Security Score", fmt.Sprintf("%d / 100", SafetyScoreFromRiskScore(float64(m.RiskScore)))},
 	}
 
 	for _, row := range rows {

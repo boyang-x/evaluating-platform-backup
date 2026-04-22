@@ -9,13 +9,11 @@ const { Title, Text } = Typography
 
 const typeLabel: Record<string, string> = {
   tool_config: '工具配置',
-  workflow: '工作流',
   suite: '评估套件',
 }
 
 const typeColor: Record<string, string> = {
   tool_config: '#4d96ff',
-  workflow: '#ff7a45',
   suite: '#52c41a',
 }
 
@@ -64,7 +62,6 @@ export function AssetMarket() {
           options={[
             { value: 'all', label: '全部类型' },
             { value: 'tool_config', label: '工具配置' },
-            { value: 'workflow', label: '工作流' },
             { value: 'suite', label: '评估套件' },
           ]}
         />

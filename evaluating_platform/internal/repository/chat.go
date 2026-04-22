@@ -25,10 +25,12 @@ func NewChatRepository(pool *pgxpool.Pool) *ChatRepository {
 func (r *ChatRepository) CreateSession(ctx context.Context, s *model.ChatSession) error {
 	targetJSON, _ := json.Marshal(s.TargetInfo)
 	planJSON, _ := json.Marshal(s.PlanInfo)
-	_, err := r.pool.Exec(ctx, `
+	err := r.pool.QueryRow(ctx, `
 		INSERT INTO chat_sessions (id, user_id, title, state, target_info, plan_info)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		s.ID, s.UserID, s.Title, s.State, targetJSON, planJSON)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING created_at, updated_at`,
+		s.ID, s.UserID, s.Title, s.State, targetJSON, planJSON).
+		Scan(&s.CreatedAt, &s.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert chat session: %w", err)
 	}
@@ -109,10 +111,12 @@ func (r *ChatRepository) DeleteSession(ctx context.Context, id uuid.UUID, userID
 
 func (r *ChatRepository) CreateMessage(ctx context.Context, m *model.ChatMessage) error {
 	metaJSON, _ := json.Marshal(m.Metadata)
-	_, err := r.pool.Exec(ctx, `
+	err := r.pool.QueryRow(ctx, `
 		INSERT INTO chat_messages (id, session_id, role, content, metadata)
-		VALUES ($1, $2, $3, $4, $5)`,
-		m.ID, m.SessionID, m.Role, m.Content, metaJSON)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING created_at`,
+		m.ID, m.SessionID, m.Role, m.Content, metaJSON).
+		Scan(&m.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("insert chat message: %w", err)
 	}

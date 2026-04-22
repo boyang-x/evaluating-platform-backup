@@ -1,6 +1,14 @@
 package chat
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/google/uuid"
+
+	"evaluating_platform/internal/model"
+	skillpkg "evaluating_platform/internal/skill"
+)
 
 func TestExtractJSONCommandFromEmbeddedText(t *testing.T) {
 	raw := "好的，我为您生成计划。\n{\"action\":\"confirm_plan\",\"message\":\"请确认\",\"plan\":{\"name\":\"内容合规检测\",\"goal\":\"检测合规风险\",\"target_type\":\"openai\",\"assessment_types\":[\"compliance_check\"]}}\n请点击确认。"
@@ -67,5 +75,126 @@ func TestGoalDescribesSampleRewriteRequiresRewriteLanguage(t *testing.T) {
 	}
 	if goalDescribesSampleRewrite("\u8bc4\u4f30 CCBOS MCP AI Agent \u7cfb\u7edf\u7684\u5b89\u5168\u6027") {
 		t.Fatalf("did not expect generic CCBOS goal to describe sample rewrite")
+	}
+}
+
+func TestBuildIntentSystemMessageMergesLaunchPromptIntoSingleSystemMessage(t *testing.T) {
+	candidates := map[string]skillpkg.LaunchSkillCandidate{
+		uuid.NewString(): {
+			SkillID:        uuid.New(),
+			SkillName:      "AI 风险检索",
+			SkillSlug:      "ai-risk-viz",
+			Description:    "Open a published interactive HTML skill in a new tab.",
+			PlannerSummary: "打开一个互动检索页面",
+			DeliveryMode:   "open_url",
+		},
+	}
+
+	msg := buildIntentSystemMessage(candidates)
+	if msg.Role != "system" {
+		t.Fatalf("expected system role, got %q", msg.Role)
+	}
+	if !strings.Contains(msg.Content, "Published interactive_web_skill candidates") {
+		t.Fatalf("expected launch prompt to be merged into system content")
+	}
+	if count := strings.Count(msg.Content, "Published interactive_web_skill candidates"); count != 1 {
+		t.Fatalf("expected one merged launch prompt, got %d", count)
+	}
+}
+
+func TestResolveClassicalChineseRewriteModePreferencePrefersSkill(t *testing.T) {
+	got := resolveClassicalChineseRewriteModePreference("sample_rewrite", true, false)
+	if got != "skill_generated" {
+		t.Fatalf("expected skill_generated, got %q", got)
+	}
+}
+
+func TestResolveClassicalChineseRewriteModePreferenceFallsBackToRewriteOnlyWhenMCPEnabled(t *testing.T) {
+	got := resolveClassicalChineseRewriteModePreference("", false, true)
+	if got != "sample_rewrite" {
+		t.Fatalf("expected sample_rewrite, got %q", got)
+	}
+}
+
+func TestResolveClassicalChineseRewriteModePreferenceClearsRewriteWhenNoCapability(t *testing.T) {
+	got := resolveClassicalChineseRewriteModePreference("sample_rewrite", false, false)
+	if got != "" {
+		t.Fatalf("expected empty preference, got %q", got)
+	}
+}
+
+func TestCanonicalizePlanGoalRebuildsSkillGeneratedGoalWhenLLMStillMentionsMCP(t *testing.T) {
+	got := canonicalizePlanGoal("通过 CCBOS MCP 改写能力生成文言文测试问题", []string{"jailbreak"}, "skill_generated")
+	if strings.Contains(strings.ToLower(got), "mcp") {
+		t.Fatalf("expected canonicalized goal to avoid MCP wording, got %q", got)
+	}
+}
+
+func TestNormalizedPlanTextValueTreatsNilPlaceholdersAsEmpty(t *testing.T) {
+	for _, value := range []any{nil, "<nil>", " nil ", "null", "undefined"} {
+		if got := normalizedPlanTextValue(value); got != "" {
+			t.Fatalf("expected empty normalized text for %#v, got %q", value, got)
+		}
+	}
+	if got := normalizedPlanTextValue("  合规检测  "); got != "合规检测" {
+		t.Fatalf("expected trimmed text, got %q", got)
+	}
+}
+
+func TestCanonicalizePlanGoalRebuildsWhenGoalWasNilPlaceholder(t *testing.T) {
+	got := canonicalizePlanGoal(normalizedPlanTextValue(nil), []string{"jailbreak"}, "skill_generated")
+	if got == "" || strings.Contains(strings.ToLower(got), "<nil>") {
+		t.Fatalf("expected rebuilt goal, got %q", got)
+	}
+}
+
+func TestCanonicalizePlanConfirmationMessageRebuildsSkillGeneratedMessageWhenLLMStillMentionsMCP(t *testing.T) {
+	planInfo := map[string]any{
+		"resource_mode_preference": "skill_generated",
+		"test_count":               20,
+	}
+	got := canonicalizePlanConfirmationMessage("我会调用 CCBOS MCP 改写能力生成测试问题。", planInfo, []string{"jailbreak"}, false)
+	if strings.Contains(strings.ToLower(got), "mcp") {
+		t.Fatalf("expected canonicalized message to avoid MCP wording, got %q", got)
+	}
+}
+
+func TestLooksLikePlanNarrative(t *testing.T) {
+	text := "评估计划概要：\n- 评估名称：文言文越狱安全评估\n- 资源模式：sample_rewrite\n- 测试数量：20\n是否确认执行此计划？"
+	if !looksLikePlanNarrative(text) {
+		t.Fatalf("expected narrative plan text to be detected")
+	}
+}
+
+func TestFallbackPlanSeedFromText(t *testing.T) {
+	userText := "请使用文言文改写能力，为目标应用设计一轮越狱安全评估。"
+	rawContent := "评估计划概要：\n- 评估类型：jailbreak\n- 资源模式：sample_rewrite\n- 测试数量：20\n是否确认执行此计划？"
+	planInfo, ok := fallbackPlanSeedFromText(userText, rawContent)
+	if !ok {
+		t.Fatalf("expected fallback plan seed to be built")
+	}
+	if got := stringSliceFromAny(planInfo["assessment_types"]); len(got) != 1 || got[0] != "jailbreak" {
+		t.Fatalf("expected jailbreak assessment type, got %#v", got)
+	}
+	if got, _ := planInfo["resource_mode_preference"].(string); got != "sample_rewrite" {
+		t.Fatalf("expected sample_rewrite preference, got %q", got)
+	}
+}
+
+func TestRecoverPlanNarrativeFromHistory(t *testing.T) {
+	history := []*model.ChatMessage{
+		{Role: model.RoleUser, Content: "请使用文言文改写能力，为目标应用设计一轮越狱安全评估。"},
+		{Role: model.RoleAssistant, Content: "评估计划概要：\n- 评估类型：jailbreak\n- 资源模式：sample_rewrite\n是否确认执行此计划？"},
+		{Role: model.RoleUser, Content: "执行"},
+	}
+	planNarrative, requestText, ok := recoverPlanNarrativeFromHistory(history)
+	if !ok {
+		t.Fatalf("expected to recover plan narrative from history")
+	}
+	if !strings.Contains(planNarrative, "评估计划概要") {
+		t.Fatalf("unexpected plan narrative: %q", planNarrative)
+	}
+	if requestText != "请使用文言文改写能力，为目标应用设计一轮越狱安全评估。" {
+		t.Fatalf("unexpected recovered request text: %q", requestText)
 	}
 }

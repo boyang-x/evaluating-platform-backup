@@ -1,6 +1,6 @@
 import api from './api'
 
-export interface WorkflowNode {
+export interface AssetNode {
   id: string
   tool_name: string
   label: string
@@ -8,15 +8,15 @@ export interface WorkflowNode {
   position: { x: number; y: number }
 }
 
-export interface WorkflowEdge {
+export interface AssetEdge {
   id: string
   source: string
   target: string
 }
 
-export interface WorkflowConfig {
-  nodes: WorkflowNode[]
-  edges: WorkflowEdge[]
+export interface AssetConfig {
+  nodes: AssetNode[]
+  edges: AssetEdge[]
   params?: Record<string, unknown>
 }
 
@@ -25,11 +25,11 @@ export interface Asset {
   expert_id: string
   name: string
   description: string
-  type: 'tool_config' | 'workflow' | 'suite'
+  type: 'tool_config' | 'suite'
   visibility: 'private' | 'org' | 'public'
   status: 'draft' | 'testing' | 'published' | 'deprecated'
   version: string
-  config: WorkflowConfig
+  config: AssetConfig
   price_unit: number
   call_count: number
   created_at: string
@@ -39,10 +39,10 @@ export interface Asset {
 export interface CreateAssetData {
   name: string
   description?: string
-  type: string
+  type: 'tool_config' | 'suite'
   visibility?: string
   version?: string
-  config?: WorkflowConfig
+  config?: AssetConfig
   price_unit?: number
 }
 
@@ -57,26 +57,9 @@ export const assetService = {
     return res.data
   },
 
-  async get(id: string): Promise<Asset> {
-    const res = await api.get<Asset>(`/tools/${id}`)
-    return res.data
-  },
-
   async create(data: CreateAssetData): Promise<{ asset_id: string }> {
     const res = await api.post('/assets', data)
     return res.data
-  },
-
-  async update(id: string, data: Partial<CreateAssetData>): Promise<void> {
-    await api.put(`/tools/${id}`, data)
-  },
-
-  async publish(id: string): Promise<void> {
-    await api.put(`/tools/${id}/publish`)
-  },
-
-  async submitForReview(id: string): Promise<void> {
-    await api.put(`/tools/${id}/submit`)
   },
 
   async deprecate(id: string): Promise<void> {

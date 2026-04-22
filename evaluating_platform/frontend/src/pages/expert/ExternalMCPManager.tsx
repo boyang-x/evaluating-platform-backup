@@ -23,6 +23,7 @@ import {
   DeleteOutlined,
   EditOutlined,
   LinkOutlined,
+  PoweroffOutlined,
   ReloadOutlined,
   SyncOutlined,
 } from '@ant-design/icons'
@@ -236,6 +237,16 @@ export function ExternalMCPManager() {
     }
   }
 
+  const handleDisconnect = async (id: string) => {
+    try {
+      await expertService.disconnectExternalMCPServer(id)
+      message.success('MCP 连接已关闭')
+      loadItems()
+    } catch (error: unknown) {
+      message.error((error as Error).message || '关闭连接失败')
+    }
+  }
+
   const handleViewTools = async (item: ExternalMCPServer) => {
     try {
       setSelectedServerName(item.name)
@@ -298,6 +309,21 @@ export function ExternalMCPManager() {
                   <Button key="sync" type="link" icon={<SyncOutlined />} onClick={() => handleSync(item.id)}>
                     同步工具
                   </Button>,
+                  <Popconfirm
+                    key="disconnect"
+                    title={`确认关闭 “${item.name}” 的连接吗？`}
+                    description="会断开当前外部 MCP 连接，并清空平台内已同步的代理工具；配置仍会保留。"
+                    onConfirm={() => handleDisconnect(item.id)}
+                    disabled={!item.enabled && item.status === 'disabled'}
+                  >
+                    <Button
+                      type="link"
+                      icon={<PoweroffOutlined />}
+                      disabled={!item.enabled && item.status === 'disabled'}
+                    >
+                      关闭连接
+                    </Button>
+                  </Popconfirm>,
                   <Button key="edit" type="link" icon={<EditOutlined />} onClick={() => openEdit(item)}>
                     编辑
                   </Button>,

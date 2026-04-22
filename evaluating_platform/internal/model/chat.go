@@ -35,10 +35,10 @@ type ChatSession struct {
 type ChatMessageRole string
 
 const (
-	RoleUser       ChatMessageRole = "user"
-	RoleAssistant  ChatMessageRole = "assistant"
-	RoleSystem     ChatMessageRole = "system"
-	RoleToolEvent  ChatMessageRole = "tool_event"
+	RoleUser      ChatMessageRole = "user"
+	RoleAssistant ChatMessageRole = "assistant"
+	RoleSystem    ChatMessageRole = "system"
+	RoleToolEvent ChatMessageRole = "tool_event"
 )
 
 // ChatMessage 对话消息
@@ -48,7 +48,7 @@ type ChatMessage struct {
 	Role      ChatMessageRole `json:"role"`
 	Content   string          `json:"content"`
 	// Metadata 结构化元数据，用于前端渲染特殊卡片
-	// card_type: "plan_confirm" | "progress" | "report" | "text"
-	Metadata  map[string]any  `json:"metadata"`
-	CreatedAt time.Time       `json:"created_at"`
+	// card_type: "plan_confirm" | "progress" | "report" | "skill_launch" | "text"
+	Metadata  map[string]any `json:"metadata"`
+	CreatedAt time.Time      `json:"created_at"`
 }

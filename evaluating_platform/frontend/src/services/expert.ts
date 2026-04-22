@@ -79,6 +79,9 @@ export const expertService = {
   syncExternalMCPServer: (id: string) =>
     api.post(`/external-mcp-servers/${id}/sync`).then((r) => r.data),
 
+  disconnectExternalMCPServer: (id: string) =>
+    api.post(`/external-mcp-servers/${id}/disconnect`).then((r) => r.data),
+
   listExternalMCPTools: (id: string) =>
     api.get(`/external-mcp-servers/${id}/tools`).then((r) => r.data),
 
@@ -147,4 +150,43 @@ export const expertService = {
   deleteDetector: (id: string) => api.delete(`/detectors/${id}`).then((r) => r.data),
 
   runDetector: (id: string) => api.post(`/detectors/${id}/run`).then((r) => r.data),
+
+  importSkill: (data: FormData) =>
+    api.post('/skills/import', data, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then((r) => r.data),
+
+  listSkills: () =>
+    api.get('/skills').then((r) => r.data),
+
+  getSkill: (id: string) =>
+    api.get(`/skills/${id}`).then((r) => r.data),
+
+  getSkillConfig: (id: string, versionID?: string) =>
+    api.get(`/skills/${id}/config`, {
+      params: versionID ? { version_id: versionID } : undefined,
+    }).then((r) => r.data),
+
+  updateSkillConfig: (id: string, data: {
+    version_id?: string
+    values: Array<{ key: string; value?: unknown; clear?: boolean }>
+  }) => api.put(`/skills/${id}/config`, data).then((r) => r.data),
+
+  selfTestSkill: (id: string, versionID: string) =>
+    api.post(`/skills/${id}/versions/${versionID}/self-test`).then((r) => r.data),
+
+  publishSkill: (id: string, versionID?: string) =>
+    api.post(`/skills/${id}/publish`, { version_id: versionID || '' }).then((r) => r.data),
+
+  disableSkill: (id: string) =>
+    api.post(`/skills/${id}/disable`).then((r) => r.data),
+
+  enableSkill: (id: string) =>
+    api.post(`/skills/${id}/enable`).then((r) => r.data),
+
+  deleteSkill: (id: string) =>
+    api.delete(`/skills/${id}`).then((r) => r.data),
+
+  listSkillRuns: (id: string) =>
+    api.get(`/skills/${id}/runs`).then((r) => r.data),
 }

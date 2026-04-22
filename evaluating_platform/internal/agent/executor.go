@@ -130,6 +130,10 @@ func (e *Executor) timeoutForTool(toolName string) time.Duration {
 		if timeout == 0 || timeout < 2*time.Minute {
 			return 2 * time.Minute
 		}
+	case "run_generator_skill":
+		if timeout == 0 || timeout < 5*time.Minute {
+			return 5 * time.Minute
+		}
 	case "rewrite_attack_sample_with_ccbos":
 		if timeout == 0 || timeout < 5*time.Minute {
 			return 5 * time.Minute

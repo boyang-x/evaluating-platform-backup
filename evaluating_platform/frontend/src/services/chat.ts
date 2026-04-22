@@ -18,7 +18,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool_event'
   content: string
   metadata: {
-    card_type?: 'text' | 'plan_confirm' | 'progress' | 'report'
+    card_type?: 'text' | 'plan_confirm' | 'progress' | 'report' | 'skill_launch'
     plan?: PlanInfo
     assessment_id?: string
     risk_level?: string
@@ -27,9 +27,23 @@ export interface ChatMessage {
     executed_count?: number
     planned_count?: number
     pdf_url?: string
+    skill_id?: string
+    skill_name?: string
+    open_url?: string
     [key: string]: unknown
   }
   created_at: string
+}
+
+export interface SkillLaunchDocument {
+  skill_id: string
+  skill_name: string
+  skill_slug: string
+  version_id: string
+  version: string
+  document_title: string
+  html: string
+  launch_mode: string
 }
 
 export interface PlanInfo {
@@ -42,6 +56,16 @@ export interface PlanInfo {
   assessment_types: string[]
   resource_mode_preference?: string
   test_count?: number
+}
+
+export interface WelcomeCapability {
+  id: string
+  label: string
+  prompt: string
+  tone: 'attack' | 'governance' | 'engine' | 'tool'
+  source_kind: 'skill' | 'mcp' | 'resource'
+  source_type?: string
+  description?: string
 }
 
 export const chatService = {
@@ -72,5 +96,15 @@ export const chatService = {
 
   async deleteSession(id: string): Promise<void> {
     await api.delete(`/chat/sessions/${id}`)
+  },
+
+  async getSkillLaunchDocument(id: string): Promise<SkillLaunchDocument> {
+    const res = await api.get(`/enterprise/skills/${id}/launch`)
+    return res.data.item
+  },
+
+  async getWelcomeCapabilities(limit = 6): Promise<WelcomeCapability[]> {
+    const res = await api.get('/enterprise/welcome-capabilities', { params: { limit } })
+    return res.data.items || []
   },
 }

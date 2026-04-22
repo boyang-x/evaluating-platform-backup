@@ -26,6 +26,7 @@ type resourceCard struct {
 	AttackStyle               string   `json:"attack_style"`
 	Difficulty                string   `json:"difficulty"`
 	ExpectedSignal            string   `json:"expected_signal"`
+	InputSourceMode           string   `json:"input_source_mode,omitempty"`
 	SampleCount               int      `json:"sample_count,omitempty"`
 	Variables                 []string `json:"variables,omitempty"`
 	RecommendedPairings       []string `json:"recommended_pairings,omitempty"`

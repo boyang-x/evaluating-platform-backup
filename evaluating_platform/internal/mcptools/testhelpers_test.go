@@ -160,7 +160,7 @@ func startTestMCPServer(t *testing.T) int {
 	ln.Close()
 
 	// 创建 MCP server (no pool/llmClient needed after refactor)
-	mcpServer := NewMCPServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	mcpServer := NewMCPServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	baseURL := fmt.Sprintf("http://localhost:%d", port)
 	sseServer := server.NewSSEServer(mcpServer, server.WithBaseURL(baseURL))
 

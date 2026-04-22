@@ -2,8 +2,8 @@
 import { Layout, Menu, Typography, Avatar, Dropdown, Badge } from 'antd'
 import { useEffect, useState } from 'react'
 import {
-  AppstoreOutlined,
   ApiOutlined,
+  CodeOutlined,
   FileTextOutlined,
   LogoutOutlined,
   UserOutlined,
@@ -13,12 +13,12 @@ import {
   ExperimentOutlined,
   RocketOutlined,
 } from '@ant-design/icons'
-import { WorkflowEditor } from './WorkflowEditor'
 import { AssetMarket } from './AssetMarket'
 import { MyAssets } from './MyAssets'
 import { SampleManager } from './SampleManager'
 import { EngineManager } from './EngineManager'
 import { ExternalMCPManager } from './ExternalMCPManager'
+import { SkillManager } from './SkillManager'
 import { useAuth } from '../../context/AuthContext'
 import { billingService } from '../../services/billing'
 
@@ -28,8 +28,8 @@ const { Text } = Typography
 const menuItems = [
   { key: '/expert/samples', icon: <ExperimentOutlined />, label: '样本管理' },
   { key: '/expert/engine', icon: <RocketOutlined />, label: '引擎管理' },
+  { key: '/expert/skills', icon: <CodeOutlined />, label: 'Skill 管理' },
   { key: '/expert/mcp-services', icon: <ApiOutlined />, label: 'MCP 服务' },
-  { key: '/expert/workflow', icon: <AppstoreOutlined />, label: '工作流编排' },
   { key: '/expert/assets', icon: <FileTextOutlined />, label: '我的资产' },
   { key: '/expert/market', icon: <ShopOutlined />, label: '资产市场' },
 ]
@@ -173,8 +173,8 @@ export function ExpertPortal() {
           <Routes>
             <Route path="samples" element={<SampleManager />} />
             <Route path="engine" element={<EngineManager />} />
+            <Route path="skills" element={<SkillManager />} />
             <Route path="mcp-services" element={<ExternalMCPManager />} />
-            <Route path="workflow" element={<WorkflowEditor />} />
             <Route path="assets" element={<MyAssets />} />
             <Route path="market" element={<AssetMarket />} />
             <Route path="*" element={<SampleManager />} />

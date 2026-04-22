@@ -13,6 +13,7 @@ import (
 
 	"evaluating_platform/internal/model"
 	"evaluating_platform/internal/repository"
+	skillpkg "evaluating_platform/internal/skill"
 	"evaluating_platform/internal/sample"
 )
 
@@ -21,9 +22,10 @@ func registerRecommendResources(
 	sampleRepo *repository.AttackSampleRepository,
 	composedRepo *repository.ComposedAttackRepository,
 	tplRepo *repository.TemplateRepository,
+	skillService *skillpkg.Service,
 ) {
 	tool := mcp.NewTool("recommend_resources",
-		mcp.WithDescription("根据评估目标和评估类型，推荐合适的样本+模板组合，以及可直接执行的已组合攻击。"),
+		mcp.WithDescription("根据评估目标和评估类型，推荐样本+模板、已组合攻击和已发布的 generator skill。"),
 		mcp.WithString("goal", mcp.Required(), mcp.Description("评估目标描述")),
 		mcp.WithArray("assessment_types", mcp.Description("评估类型数组，如 [\"compliance_check\"]")),
 		mcp.WithString("target_type", mcp.Description("目标系统类型，可选：openai | agent | custom")),
@@ -78,15 +80,35 @@ func registerRecommendResources(
 			composedCards = append(composedCards, buildComposedAttackCard(item, nil))
 		}
 
+		skillCards := make([]resourceCard, 0)
+		skillBundles := make(map[string]skillpkg.SkillBundle)
+		if skillService != nil {
+			bundles, err := skillService.SearchPublished(ctx, assessmentTypes, goal)
+			if err != nil {
+				return mcp.NewToolResultError("query published skills failed: " + err.Error()), nil
+			}
+			for _, bundle := range bundles {
+				if bundle.Skill == nil || bundle.Version == nil {
+					continue
+				}
+				card := buildSkillCard(bundle)
+				skillCards = append(skillCards, card)
+				skillBundles[card.ID] = bundle
+			}
+		}
+
 		pairs, composedRecommendations := buildRecommendations(goal, assessmentTypes, targetType, sampleCards, templateCards, composedCards, maxResults)
+		skillRecommendations := buildSkillRecommendations(goal, assessmentTypes, skillCards, skillBundles, maxResults)
 		result := map[string]interface{}{
 			"assessment_types":             assessmentTypes,
 			"sample_candidates":            sampleCards,
 			"template_candidates":          templateCards,
 			"composed_attack_candidates":   composedCards,
+			"skill_candidates":             skillCards,
 			"recommended_pairs":            pairs,
 			"recommended_composed_attacks": composedRecommendations,
-			"selection_guidance":           "优先从 recommended_pairs 或 recommended_composed_attacks 中选择真实资源 ID；若命中已组合攻击，应直接加载并执行，跳过模板拼接。",
+			"recommended_skills":           skillRecommendations,
+			"selection_guidance":           "优先从 recommended_pairs、recommended_composed_attacks 或 recommended_skills 中选择真实资源 ID；若命中 skill_generated，则由 skill_runner 生成 payload_dataset。",
 		}
 
 		b, _ := json.Marshal(result)
@@ -96,7 +118,7 @@ func registerRecommendResources(
 
 func registerPreviewAttackSample(s *server.MCPServer, sampleRepo *repository.AttackSampleRepository, loader *sample.Loader) {
 	tool := mcp.NewTool("preview_attack_sample",
-		mcp.WithDescription("返回样本的资源画像和少量脱敏示例，帮助编排 LLM 选择资源而不暴露完整内容"),
+		mcp.WithDescription("返回样本的资源摘要和少量脱敏示例，帮助编排 LLM 选择样本而不暴露完整内容。"),
 		mcp.WithString("sample_id", mcp.Required(), mcp.Description("攻击样本 ID")),
 		mcp.WithNumber("preview_count", mcp.Description("预览条数，默认 3")),
 	)
@@ -135,7 +157,7 @@ func registerPreviewAttackSample(s *server.MCPServer, sampleRepo *repository.Att
 
 func registerPreviewTemplate(s *server.MCPServer, tplRepo *repository.TemplateRepository) {
 	tool := mcp.NewTool("preview_template",
-		mcp.WithDescription("返回模板的资源画像、变量和结构摘要，帮助编排 LLM 选择模板而不暴露完整内容"),
+		mcp.WithDescription("返回模板的资源画像、变量和结构摘要，帮助编排 LLM 选择模板而不暴露完整内容。"),
 		mcp.WithString("template_id", mcp.Required(), mcp.Description("模板 ID")),
 	)
 
@@ -170,11 +192,6 @@ func buildRecommendations(
 	composedAttacks []resourceCard,
 	maxResults int,
 ) ([]recommendationResult, []composedAttackRecommendation) {
-	type scoredCard struct {
-		card  resourceCard
-		score float64
-	}
-
 	scoredSamples := scoreCards(goal, assessmentTypes, targetType, samples)
 	scoredTemplates := scoreCards(goal, assessmentTypes, targetType, templates)
 	scoredComposed := scoreCards(goal, assessmentTypes, targetType, composedAttacks)

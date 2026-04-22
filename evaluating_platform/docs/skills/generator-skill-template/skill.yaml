@@ -1,0 +1,85 @@
+manifest_version: "1.0"
+skill_type: generator_skill
+name: example-generator-skill
+display_name: Example Generator Skill
+version: "1.0.0"
+description: >
+  Generate a standardized payload_dataset from expert samples or goal text
+  for downstream execution.
+category: example
+capability_profile: example_payload_generator
+input_source_mode: platform_resource_only
+assessment_types:
+  - jailbreak
+config_schema:
+  - key: region
+    label: Region
+    type: select
+    required: true
+    description: Choose the runtime region for this skill.
+    env_name: SKILL_REGION
+    default: cn
+    options:
+      - label: China
+        value: cn
+      - label: US
+        value: us
+  - key: dataset_prefix
+    label: Dataset Prefix
+    type: text
+    required: false
+    description: Optional prefix appended to generated dataset identifiers.
+    env_name: DATASET_PREFIX
+    placeholder: example-prefix
+  - key: upstream_api_key
+    label: Upstream API Key
+    type: text
+    required: false
+    description: Optional upstream API key injected into the runtime container.
+    env_name: UPSTREAM_API_KEY
+    secret: true
+  - key: max_items
+    label: Max Items
+    type: number
+    required: false
+    description: Optional upper bound enforced by the runtime.
+    env_name: MAX_ITEMS
+    default: 20
+  - key: enable_strict_mode
+    label: Strict Mode
+    type: boolean
+    required: false
+    description: Whether to enable strict validation in the runtime.
+    env_name: ENABLE_STRICT_MODE
+    default: false
+permissions:
+  direct_target_access: false
+  target_access_purpose: none
+  direct_mcp_access: false
+  platform_tool_access: false
+  network_access: false
+  code_execution: true
+  file_read_access: true
+  file_write_access: true
+  returns_sensitive_payload_inline: false
+  can_generate_final_report: false
+metadata:
+  accepted_resource_types:
+    - sample
+  accepted_resource_modes:
+    - sample_rewrite
+  minimum_items: 1
+  maximum_items: 20
+execution:
+  runtime: python3.12
+  entrypoint: runtime/main.py
+  self_test_entrypoint: runtime/selfcheck.py
+  timeout_seconds: 180
+embedded_resources:
+  embedded_dataset_id: ""
+  summary:
+    mode: platform_sample_only
+    supports_platform_samples: true
+    supports_embedded_dataset: false
+    notes:
+      - Replace with the real data source description for your skill.

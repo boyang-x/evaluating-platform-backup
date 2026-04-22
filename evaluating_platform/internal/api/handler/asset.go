@@ -12,17 +12,15 @@ import (
 	"evaluating_platform/pkg/logger"
 )
 
-// AssetHandler 资产处理器（专家工具上传/管理）
+// AssetHandler handles expert asset upload and management endpoints.
 type AssetHandler struct {
 	assetRepo *repository.AssetRepository
 }
 
-// NewAssetHandler 创建资产处理器
 func NewAssetHandler(assetRepo *repository.AssetRepository) *AssetHandler {
 	return &AssetHandler{assetRepo: assetRepo}
 }
 
-// CreateAssetRequest 创建资产请求体
 type CreateAssetRequest struct {
 	Name        string                `json:"name" binding:"required"`
 	Description string                `json:"description"`
@@ -33,7 +31,7 @@ type CreateAssetRequest struct {
 	PriceUnit   float64               `json:"price_unit"`
 }
 
-// UploadTool 专家创建/上传资产
+// UploadTool creates an asset and makes it immediately available.
 // POST /api/v1/tools
 // POST /api/v1/assets
 func (h *AssetHandler) UploadTool(c *gin.Context) {
@@ -44,10 +42,10 @@ func (h *AssetHandler) UploadTool(c *gin.Context) {
 	}
 
 	switch req.Type {
-	case model.AssetTypeToolConfig, model.AssetTypeWorkflow, model.AssetTypeSuite:
+	case model.AssetTypeToolConfig, model.AssetTypeSuite:
 		// valid
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"error": "type 必须为 tool_config | workflow | suite"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "type must be tool_config or suite"})
 		return
 	}
 
@@ -69,7 +67,7 @@ func (h *AssetHandler) UploadTool(c *gin.Context) {
 		Description: req.Description,
 		Type:        req.Type,
 		Visibility:  visibility,
-		Status:      model.AssetStatusDraft,
+		Status:      model.AssetStatusPublished,
 		Version:     version,
 		Config:      req.Config,
 		PriceUnit:   req.PriceUnit,
@@ -80,7 +78,7 @@ func (h *AssetHandler) UploadTool(c *gin.Context) {
 			"expert_id": expertID,
 			"error":     err.Error(),
 		})
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建资产失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "create asset failed"})
 		return
 	}
 
@@ -88,23 +86,18 @@ func (h *AssetHandler) UploadTool(c *gin.Context) {
 		"asset_id":  asset.ID,
 		"expert_id": expertID,
 		"type":      asset.Type,
+		"status":    asset.Status,
 	})
 	c.JSON(http.StatusCreated, gin.H{
 		"asset_id": asset.ID,
 		"status":   asset.Status,
-		"message":  "资产已创建，待发布",
+		"message":  "asset created and available immediately",
 	})
 }
 
-// ListTools 列出资产
-// GET /api/v1/tools  - 公开市场（已发布的 public 资产）
-// GET /api/v1/assets - 专家查看自己的资产（传 ?mine=1）
-//
-// Query params:
-//
-//	type=workflow|tool_config|suite  按类型过滤（公开市场有效）
-//	mine=1                           专家/管理员查看自己的所有资产（含 draft）
-//	limit=20  offset=0               分页
+// ListTools lists public assets or the current expert's assets.
+// GET /api/v1/tools
+// GET /api/v1/assets
 func (h *AssetHandler) ListTools(c *gin.Context) {
 	assetType := c.Query("type")
 	mine := c.Query("mine") == "1" || c.Query("mine") == "true"
@@ -117,8 +110,6 @@ func (h *AssetHandler) ListTools(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-
-	// 专家/管理员查看自己的资产
 	if mine && (role == "expert" || role == "admin") {
 		expertID, _ := uuid.Parse(c.GetString("user_id"))
 		assets, total, err := h.assetRepo.ListByExpert(ctx, expertID, limit, offset)
@@ -127,7 +118,7 @@ func (h *AssetHandler) ListTools(c *gin.Context) {
 				"expert_id": expertID,
 				"error":     err.Error(),
 			})
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "query assets failed"})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
@@ -139,13 +130,12 @@ func (h *AssetHandler) ListTools(c *gin.Context) {
 		return
 	}
 
-	// 默认：公开市场（published + public）
 	assets, total, err := h.assetRepo.ListPublic(ctx, assetType, limit, offset)
 	if err != nil {
 		logger.Error("list public assets failed", map[string]interface{}{
 			"error": err.Error(),
 		})
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "query assets failed"})
 		return
 	}
 
@@ -157,8 +147,7 @@ func (h *AssetHandler) ListTools(c *gin.Context) {
 	})
 }
 
-// PublishTool 发布资产（仅资产所有者）
-// 允许从 draft 或 testing 状态发布。
+// PublishTool remains as a compatibility endpoint and now simply ensures the asset is available.
 // PUT /api/v1/tools/:id/publish
 func (h *AssetHandler) PublishTool(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -168,8 +157,7 @@ func (h *AssetHandler) PublishTool(c *gin.Context) {
 	}
 
 	expertID, _ := uuid.Parse(c.GetString("user_id"))
-
-	if err := h.assetRepo.PublishAsset(c.Request.Context(), id, expertID); err != nil {
+	if err := h.assetRepo.UpdateStatus(c.Request.Context(), id, expertID, model.AssetStatusPublished); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -181,10 +169,11 @@ func (h *AssetHandler) PublishTool(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"asset_id": id,
 		"status":   model.AssetStatusPublished,
+		"message":  "asset is available",
 	})
 }
 
-// SubmitForReview 提交资产审核（draft → testing）
+// SubmitForReview is retained as a compatibility alias after removing the expert review flow.
 // PUT /api/v1/tools/:id/submit
 func (h *AssetHandler) SubmitForReview(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -194,27 +183,23 @@ func (h *AssetHandler) SubmitForReview(c *gin.Context) {
 	}
 
 	expertID, _ := uuid.Parse(c.GetString("user_id"))
-
-	if err := h.assetRepo.UpdateStatusFrom(
-		c.Request.Context(), id, expertID,
-		model.AssetStatusDraft, model.AssetStatusTesting,
-	); err != nil {
+	if err := h.assetRepo.UpdateStatus(c.Request.Context(), id, expertID, model.AssetStatusPublished); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	logger.Info("asset submitted for review", map[string]interface{}{
+	logger.Info("asset marked available", map[string]interface{}{
 		"asset_id":  id,
 		"expert_id": expertID,
 	})
 	c.JSON(http.StatusOK, gin.H{
 		"asset_id": id,
-		"status":   model.AssetStatusTesting,
-		"message":  "资产已提交审核",
+		"status":   model.AssetStatusPublished,
+		"message":  "asset is available immediately",
 	})
 }
 
-// DeprecateTool 废弃资产（可从任意状态转换）
+// DeprecateTool disables an asset for future use.
 // PUT /api/v1/tools/:id/deprecate
 func (h *AssetHandler) DeprecateTool(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
@@ -224,7 +209,6 @@ func (h *AssetHandler) DeprecateTool(c *gin.Context) {
 	}
 
 	expertID, _ := uuid.Parse(c.GetString("user_id"))
-
 	if err := h.assetRepo.UpdateStatus(c.Request.Context(), id, expertID, model.AssetStatusDeprecated); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

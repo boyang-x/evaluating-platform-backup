@@ -79,6 +79,7 @@ func (h *TargetLLMHandler) UpdateConfig(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	req.BaseURL = normalizeLLMBaseURL(req.BaseURL)
 
 	userID, _ := uuid.Parse(c.GetString("user_id"))
 
@@ -99,6 +100,12 @@ func (h *TargetLLMHandler) UpdateConfig(c *gin.Context) {
 	connectorType := req.ConnectorType
 	if connectorType == "" {
 		connectorType = "openai"
+	}
+	if connectorType == "openai" {
+		if err := validateOpenAICompatibleProviderConfig(req.BaseURL, req.Model); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	cfg := &model.TargetLLMConfig{
@@ -135,6 +142,7 @@ func (h *TargetLLMHandler) TestConnection(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	req.BaseURL = normalizeLLMBaseURL(req.BaseURL)
 
 	userID, _ := uuid.Parse(c.GetString("user_id"))
 
@@ -155,6 +163,12 @@ func (h *TargetLLMHandler) TestConnection(c *gin.Context) {
 	connectorType := req.ConnectorType
 	if connectorType == "" {
 		connectorType = "openai"
+	}
+	if connectorType == "openai" {
+		if err := validateOpenAICompatibleProviderConfig(req.BaseURL, req.Model); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	// 使用 connector.NewConnector 创建对应类型的连接器测试

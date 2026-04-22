@@ -1,0 +1,22 @@
+stateDiagram-v2
+    [*] --> intent_collecting
+
+    intent_collecting --> confirming_plan: plan_confirm card
+    intent_collecting --> skill_launch_only: launch_skill card
+    skill_launch_only --> intent_collecting: continue chat
+
+    confirming_plan --> running: user confirms execution
+    confirming_plan --> intent_collecting: user revises request
+
+    running --> starting: create assessment
+    starting --> selecting_resources: recommend_resources + plan
+    selecting_resources --> preparing_payloads: choose mode and load resources
+    preparing_payloads --> enhancing_payloads: enhancement needed
+    preparing_payloads --> executing: no enhancement needed
+    enhancing_payloads --> executing
+    executing --> reporting
+    reporting --> completed
+    running --> failed: any stage error
+
+    completed --> [*]
+    failed --> [*]

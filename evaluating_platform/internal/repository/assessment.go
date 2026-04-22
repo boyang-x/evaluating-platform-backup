@@ -3,14 +3,26 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"evaluating_platform/internal/model"
 )
+
+var (
+	ErrAssessmentNotFound = errors.New("assessment not found")
+	ErrAssessmentActive   = errors.New("assessment is active")
+)
+
+type DeleteAllAssessmentsResult struct {
+	DeletedCount int `json:"deleted_count"`
+	ActiveCount  int `json:"active_count"`
+}
 
 // AssessmentRepository 评估任务数据访问层
 type AssessmentRepository struct {
@@ -277,4 +289,125 @@ func (r *AssessmentRepository) CountStats(ctx context.Context) (int, []int, erro
 		weekly = append(weekly, 0)
 	}
 	return total, weekly, nil
+}
+
+// Delete 删除评估任务及其关联记录（仅允许删除已结束的任务）
+func (r *AssessmentRepository) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin delete assessment tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var status model.AssessmentStatus
+	if err := tx.QueryRow(
+		ctx,
+		`SELECT status FROM assessments WHERE id = $1 AND user_id = $2 FOR UPDATE`,
+		id,
+		userID,
+	).Scan(&status); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAssessmentNotFound
+		}
+		return fmt.Errorf("query assessment for delete: %w", err)
+	}
+
+	if status == model.StatusPending || status == model.StatusRunning {
+		return ErrAssessmentActive
+	}
+
+	if _, err := tx.Exec(
+		ctx,
+		`UPDATE billing_records SET assessment_id = NULL WHERE assessment_id = $1 AND user_id = $2`,
+		id,
+		userID,
+	); err != nil {
+		return fmt.Errorf("detach billing records: %w", err)
+	}
+
+	if _, err := tx.Exec(
+		ctx,
+		`UPDATE chat_sessions SET assessment_id = NULL WHERE assessment_id = $1 AND user_id = $2`,
+		id,
+		userID,
+	); err != nil {
+		return fmt.Errorf("detach chat sessions: %w", err)
+	}
+
+	tag, err := tx.Exec(ctx, `DELETE FROM assessments WHERE id = $1 AND user_id = $2`, id, userID)
+	if err != nil {
+		return fmt.Errorf("delete assessment: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrAssessmentNotFound
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit delete assessment tx: %w", err)
+	}
+	return nil
+}
+
+// DeleteAll 删除当前用户全部已结束的评估任务及其关联记录，运行中/排队中的任务会被保留。
+func (r *AssessmentRepository) DeleteAll(ctx context.Context, userID uuid.UUID) (*DeleteAllAssessmentsResult, error) {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("begin delete all assessments tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	var activeCount int
+	if err := tx.QueryRow(
+		ctx,
+		`SELECT COUNT(*) FROM assessments WHERE user_id = $1 AND status IN ('pending', 'running')`,
+		userID,
+	).Scan(&activeCount); err != nil {
+		return nil, fmt.Errorf("count active assessments: %w", err)
+	}
+
+	deletableIDs := `
+		SELECT id
+		FROM assessments
+		WHERE user_id = $1 AND status NOT IN ('pending', 'running')
+		FOR UPDATE
+	`
+
+	if _, err := tx.Exec(
+		ctx,
+		`UPDATE billing_records
+		SET assessment_id = NULL
+		WHERE user_id = $1 AND assessment_id IN (`+deletableIDs+`)`,
+		userID,
+	); err != nil {
+		return nil, fmt.Errorf("detach billing records for delete all: %w", err)
+	}
+
+	if _, err := tx.Exec(
+		ctx,
+		`UPDATE chat_sessions
+		SET assessment_id = NULL
+		WHERE user_id = $1 AND assessment_id IN (`+deletableIDs+`)`,
+		userID,
+	); err != nil {
+		return nil, fmt.Errorf("detach chat sessions for delete all: %w", err)
+	}
+
+	tag, err := tx.Exec(
+		ctx,
+		`DELETE FROM assessments
+		WHERE user_id = $1 AND status NOT IN ('pending', 'running')`,
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("delete all assessments: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit delete all assessments tx: %w", err)
+	}
+
+	return &DeleteAllAssessmentsResult{
+		DeletedCount: int(tag.RowsAffected()),
+		ActiveCount:  activeCount,
+	}, nil
 }

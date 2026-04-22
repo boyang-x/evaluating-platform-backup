@@ -252,6 +252,43 @@ func (h *ExternalMCPHandler) SyncServer(c *gin.Context) {
 	})
 }
 
+func (h *ExternalMCPHandler) DisconnectServer(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	expertID, _ := uuid.Parse(c.GetString("user_id"))
+	item, err := h.serverRepo.GetByIDForExpert(c.Request.Context(), id, expertID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if item == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "external mcp server not found"})
+		return
+	}
+
+	item.Enabled = false
+	item.Status = "disabled"
+	item.LastError = ""
+	item.LastSyncAt = nil
+	if err := h.serverRepo.Update(c.Request.Context(), item); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.manager.DisableServer(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	fresh, _ := h.serverRepo.GetByID(c.Request.Context(), id)
+	if fresh != nil {
+		item = fresh
+	}
+	c.JSON(http.StatusOK, gin.H{"item": serializeExternalMCPServer(*item)})
+}
+
 func (h *ExternalMCPHandler) ListTools(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {

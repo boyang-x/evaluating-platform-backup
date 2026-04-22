@@ -77,7 +77,7 @@ func (c *OpenAIConnector) SendMessage(ctx context.Context, req *AssessRequest) (
 			RawBody:    string(rawBody),
 			StatusCode: resp.StatusCode,
 			Headers:    headers,
-		}, fmt.Errorf("target API error %d", resp.StatusCode)
+		}, fmt.Errorf("target API error %d: %s", resp.StatusCode, string(rawBody))
 	}
 
 	// 解析 OpenAI 响应格式

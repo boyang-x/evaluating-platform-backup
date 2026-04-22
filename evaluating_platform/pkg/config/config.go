@@ -19,6 +19,7 @@ type Config struct {
 	Billing  BillingConfig  `mapstructure:"billing"`
 	MCP      MCPConfig      `mapstructure:"mcp"`
 	Crypto   CryptoConfig   `mapstructure:"crypto"`
+	Skill    SkillConfig    `mapstructure:"skill"`
 }
 
 // CryptoConfig 加密配置
@@ -83,6 +84,11 @@ type MCPConfig struct {
 	Port int `mapstructure:"port"` // MCP SSE Server 监听端口，默认 18080
 }
 
+type SkillConfig struct {
+	RunnerBaseURL        string `mapstructure:"runner_base_url"`
+	RunnerTimeoutSeconds int    `mapstructure:"runner_timeout_seconds"`
+}
+
 // Load 从文件或环境变量加载配置
 func Load(path string) (*Config, error) {
 	v := viper.New()
@@ -105,6 +111,10 @@ func Load(path string) (*Config, error) {
 	_ = v.BindEnv("llm.base_url", "LLM_BASE_URL")
 	_ = v.BindEnv("llm.api_key", "LLM_API_KEY")
 	_ = v.BindEnv("llm.model", "LLM_MODEL")
+	_ = v.BindEnv("auth.jwt_secret", "JWT_SECRET")
+	_ = v.BindEnv("storage.access_key", "MINIO_ACCESS_KEY")
+	_ = v.BindEnv("storage.secret_key", "MINIO_SECRET_KEY")
+	_ = v.BindEnv("crypto.master_key", "CRYPTO_MASTER_KEY")
 
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
@@ -141,6 +151,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("billing.expert_share_rate", 0.3)
 
 	v.SetDefault("mcp.port", 18080)
+	v.SetDefault("skill.runner_base_url", "http://skill_runner:8091")
+	v.SetDefault("skill.runner_timeout_seconds", 300)
 
 	v.SetDefault("crypto.master_key", "")
 	v.SetDefault("crypto.key_id", "v1")

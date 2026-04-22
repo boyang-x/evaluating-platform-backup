@@ -87,6 +87,7 @@ services:
       LLM_BASE_URL: "${LLM_BASE_URL:-https://api.deepseek.com/v1}"
       LLM_MODEL: "${LLM_MODEL:-deepseek-chat}"
       JWT_SECRET: "${JWT_SECRET:-change-me-in-dev}"
+      CRYPTO_MASTER_KEY: "${CRYPTO_MASTER_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin123
       GIN_MODE: debug
@@ -100,6 +101,28 @@ services:
       - ./migrations:/app/migrations:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  skill_runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.skillrunner
+    container_name: ep_skill_runner
+    restart: unless-stopped
+    environment:
+      SKILL_RUNNER_PORT: 8091
+      SKILL_RUNNER_DOCKER_NETWORK: ep_network
+      LLM_API_KEY: "${LLM_API_KEY}"
+      LLM_BASE_URL: "${LLM_BASE_URL:-https://api.deepseek.com/v1}"
+      LLM_MODEL: "${LLM_MODEL:-deepseek-chat}"
+    ports:
+      - "8091:8091"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/health"]
       interval: 15s
       timeout: 5s
       retries: 3
