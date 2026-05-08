@@ -6,12 +6,12 @@ import {
   TeamOutlined,
   LogoutOutlined,
   UserOutlined,
-  SafetyOutlined,
 } from '@ant-design/icons'
 import { AdminDashboard } from './AdminDashboard'
 import { UserManagement } from './UserManagement'
 import { useAuth } from '../../context/AuthContext'
 import { adminService } from '../../services/admin'
+import appLogoUrl from '../../assets/qianxin-ai-security-logo.png'
 
 const { Sider, Header, Content } = Layout
 const { Text } = Typography
@@ -63,17 +63,21 @@ export function AdminPortal() {
         >
           <div
             style={{
-              width: 32,
-              height: 32,
-              borderRadius: 8,
-              background: 'rgba(139, 92, 246, 0.15)',
-              border: '1px solid rgba(139, 92, 246, 0.4)',
+              width: 42,
+              height: 42,
+              borderRadius: '50%',
+              background: 'transparent',
+              overflow: 'hidden',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <SafetyOutlined style={{ color: '#8b5cf6', fontSize: 16 }} />
+            <img
+              src={appLogoUrl}
+              alt="Qianxin China-ASEAN AI Security Research Institute"
+              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+            />
           </div>
           <div>
             <div style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>

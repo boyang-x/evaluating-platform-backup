@@ -25,6 +25,7 @@ import { ChatPage } from './ChatPage'
 import { EnterpriseSkillOpen } from './EnterpriseSkillOpen'
 import { useAuth } from '../../context/AuthContext'
 import { billingService } from '../../services/billing'
+import appLogoUrl from '../../assets/qianxin-ai-security-logo.png'
 
 const { Sider, Header, Content } = Layout
 const { Text } = Typography
@@ -90,13 +91,17 @@ export function EnterprisePortal() {
           gap: 10,
         }}>
           <div style={{
-            width: 32, height: 32,
-            borderRadius: 8,
-            background: 'rgba(26, 109, 255, 0.2)',
-            border: '1px solid rgba(26, 109, 255, 0.5)',
+            width: 42, height: 42,
+            borderRadius: '50%',
+            background: 'transparent',
+            overflow: 'hidden',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
-            <SafetyOutlined style={{ color: '#4d96ff', fontSize: 16 }} />
+            <img
+              src={appLogoUrl}
+              alt="Qianxin China-ASEAN AI Security Research Institute"
+              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+            />
           </div>
           <div>
             <div style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>
