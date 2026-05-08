@@ -350,7 +350,8 @@ npm run build
   - `generator_skill` 支持顶层 `config_schema`
   - Skill 配置按 skill 级共享存储，使用 `skill_config_values` 加密落库
   - 缺少 required 配置时禁止发布；已发布但配置不完整的 generator skill 会从企业侧推荐和运行入口隐藏
-  - CCBOS 当前打包 skill 为 `evaluating_platform/docs/skills/ccbos-generator-skill.zip`，版本 `1.2.0`
+  - CCBOS 当前打包 skill 为 `evaluating_platform/docs/skills/ccbos-generator-skill-v1.3.0.zip`，版本 `1.3.0`
+  - CCBOS skill 当前支持双模式输入：可继续消费 `source_samples`，也可在手动调用或后续受控编排场景中使用 `user_questions` / `question` 等直接问题字段，或传入 `rewrite_request` / `user_input` 由大模型先解析出待改写问题再作为参数进入 rewrite 流程
   - CCBOS skill 配置应在导入后的专家端 Skill 配置界面填写；必填 `SKILL_LLM_API_KEY`，可选 `SKILL_LLM_BASE_URL`、`SKILL_LLM_MODEL`
   - CCBOS skill 运行时只读取 `SKILL_LLM_*`，不再 fallback 到平台全局 `LLM_*`
   - CCBOS skill 自测为离线自测，不依赖上游 LLM 连通性

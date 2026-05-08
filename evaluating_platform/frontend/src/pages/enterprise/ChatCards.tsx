@@ -3,7 +3,7 @@ import { Avatar, Button, InputNumber, Spin, message } from 'antd'
 import { ApiOutlined, BugOutlined, CheckCircleOutlined, DownloadOutlined, ExportOutlined, LoadingOutlined, RobotOutlined, SafetyOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
 
 import type { ChatMessage, PlanInfo, WelcomeCapability } from '../../services/chat'
-import { reportService } from '../../services/report'
+import { reportService, triggerBrowserDownload } from '../../services/report'
 import { LABELS, RESOURCE_MODE_LABELS, normalizePlanForDisplay, safetyScoreFromRiskScore } from './chatDisplay'
 
 const RISK_COLORS: Record<string, string> = {
@@ -122,18 +122,12 @@ function ReportCard({
     setDownloading(true)
     try {
       const blob = await reportService.downloadPDF(assessmentId)
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `report-${assessmentId}.pdf`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(url)
+      triggerBrowserDownload(blob, `report-${assessmentId}.pdf`)
     } catch {
       message.error('PDF 下载失败，请稍后重试')
+    } finally {
+      setDownloading(false)
     }
-    setDownloading(false)
   }
 
   if (cardType === 'report' && assessmentId) {

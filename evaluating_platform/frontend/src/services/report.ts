@@ -56,3 +56,16 @@ export const reportService = {
     return res.data
   },
 }
+
+export function triggerBrowserDownload(blob: Blob, filename: string) {
+  const typedBlob = blob.type ? blob : new Blob([blob], { type: 'application/pdf' })
+  const url = window.URL.createObjectURL(typedBlob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.rel = 'noopener'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  window.setTimeout(() => window.URL.revokeObjectURL(url), 60_000)
+}

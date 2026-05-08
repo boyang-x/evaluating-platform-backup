@@ -205,7 +205,7 @@ func (m *Manager) SendMessage(ctx context.Context, sessionID uuid.UUID, userID u
 		}
 	}
 
-	llmMsgs := []llm.Message{buildIntentSystemMessage(launchCandidates)}
+	llmMsgs := []llm.Message{buildIntentSystemMessage(launchCandidates, m.hasEnabledClassicalRewriteMCP(ctx))}
 	for _, h := range history {
 		switch h.Role {
 		case model.RoleUser:
@@ -338,8 +338,20 @@ Use launch_skill only when the user is clearly asking to open one of these inter
 - Never invent a skill_id. You must choose one skill_id from the candidate list above.`, string(data))
 }
 
-func buildIntentSystemMessage(candidates map[string]skillpkg.LaunchSkillCandidate) llm.Message {
+func buildCapabilityAvailabilitySystemPrompt(classicalRewriteMCPAvailable bool) string {
+	if classicalRewriteMCPAvailable {
+		return `Current capability availability:
+- External CCBOS MCP rewrite capability: available. sample_rewrite may be planned only for explicit classical-Chinese / CCBOS rewrite requests when no better published generator_skill is available.`
+	}
+	return `Current capability availability:
+- External CCBOS MCP rewrite capability: currently unavailable.
+- Do not mention CCBOS MCP, CC-BOS MCP, sample_rewrite, or external MCP iterative classical-Chinese rewrite in assessment plans while it is unavailable.
+- For generic strategy orchestration requests, choose ordinary platform resources such as sample_template, composed_attack, or leave resource_mode_preference empty.`
+}
+
+func buildIntentSystemMessage(candidates map[string]skillpkg.LaunchSkillCandidate, classicalRewriteMCPAvailable bool) llm.Message {
 	content := strings.TrimSpace(intentSystemPrompt)
+	content += "\n\n" + strings.TrimSpace(buildCapabilityAvailabilitySystemPrompt(classicalRewriteMCPAvailable))
 	if launchPrompt := strings.TrimSpace(buildLaunchSkillSystemPrompt(candidates)); launchPrompt != "" {
 		content += "\n\n" + launchPrompt
 	}
@@ -1191,9 +1203,29 @@ func planTextConflictsWithResourceMode(text string, resourceModePreference strin
 		return containsAny(lower, "mcp", "sample_rewrite")
 	case "sample_rewrite":
 		return containsAny(lower, "skill_generated", "generator skill", "published skill", "已发布 skill", "已发布skill", "skill 生成")
+	case "":
+		return planTextMentionsClassicalRewritePath(lower)
 	default:
 		return false
 	}
+}
+
+func planTextMentionsClassicalRewritePath(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	if normalized == "" {
+		return false
+	}
+	if strings.Contains(normalized, "sample_rewrite") {
+		return true
+	}
+	rewriteMarkers := []string{"rewrite", "改写", "重写", "文言文", "古文", "classical chinese", "wenyanwen", "迭代"}
+	if containsAny(normalized, "ccbos", "cc-bos") && containsAny(normalized, rewriteMarkers...) {
+		return true
+	}
+	if containsAny(normalized, "文言文", "古文", "classical chinese", "wenyanwen") && containsAny(normalized, "改写", "rewrite", "迭代", "优化", "绕过", "越狱") {
+		return true
+	}
+	return false
 }
 
 func detectResourceModePreference(text string) string {
@@ -1242,7 +1274,7 @@ func resolvePlanResourceModePreference(userIntent string, goalText string, curre
 
 func (m *Manager) resolvePlanResourceModePreference(ctx context.Context, assessmentTypes []string, goalText string, current string) string {
 	normalized := normalizePlanResourceModePreference(goalText, current)
-	if !requestsClassicalChineseRewrite(strings.ToLower(strings.TrimSpace(goalText))) {
+	if normalized != "sample_rewrite" && !requestsClassicalChineseRewrite(strings.ToLower(strings.TrimSpace(goalText))) {
 		return normalized
 	}
 	return resolveClassicalChineseRewriteModePreference(

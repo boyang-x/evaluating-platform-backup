@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Card, Tag, Typography, Progress, Divider, Button, Row, Col, Timeline, Spin } from 'antd'
+import { Card, Tag, Typography, Progress, Divider, Button, Row, Col, Timeline, Spin, message } from 'antd'
 import { DownloadOutlined, ShareAltOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
-import { reportService, type Report } from '../../services/report'
+import { reportService, triggerBrowserDownload, type Report } from '../../services/report'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -22,6 +22,7 @@ export function ReportView() {
   const { id } = useParams<{ id: string }>()
   const [report, setReport] = useState<Report | null>(null)
   const [loading, setLoading] = useState(true)
+  const [downloading, setDownloading] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -36,6 +37,17 @@ export function ReportView() {
   const findings = Array.isArray(report.findings) ? report.findings : []
   const score = typeof report.metrics?.risk_score === 'number' ? report.metrics.risk_score : 50
   const riskColor = severityConfig[report.risk_level]?.color || '#4d96ff'
+  const handleDownloadPDF = async () => {
+    setDownloading(true)
+    try {
+      const blob = await reportService.downloadPDF(report.id)
+      triggerBrowserDownload(blob, `report-${report.assessment_id || report.id}.pdf`)
+    } catch {
+      message.error('PDF 下载失败，请稍后重试')
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto' }}>
@@ -71,8 +83,8 @@ export function ReportView() {
         </Paragraph>
 
         <div style={{ marginTop: 16, display: 'flex', gap: 10 }}>
-          <Button type="primary" icon={<DownloadOutlined />}
-            onClick={() => reportService.download(report.id, 'pdf')}>
+          <Button type="primary" icon={<DownloadOutlined />} loading={downloading}
+            onClick={handleDownloadPDF}>
             下载 PDF 报告
           </Button>
           <Button icon={<ShareAltOutlined />} style={{ color: 'var(--text-secondary)' }}

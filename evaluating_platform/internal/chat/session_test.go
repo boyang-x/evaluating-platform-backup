@@ -90,7 +90,7 @@ func TestBuildIntentSystemMessageMergesLaunchPromptIntoSingleSystemMessage(t *te
 		},
 	}
 
-	msg := buildIntentSystemMessage(candidates)
+	msg := buildIntentSystemMessage(candidates, false)
 	if msg.Role != "system" {
 		t.Fatalf("expected system role, got %q", msg.Role)
 	}
@@ -99,6 +99,17 @@ func TestBuildIntentSystemMessageMergesLaunchPromptIntoSingleSystemMessage(t *te
 	}
 	if count := strings.Count(msg.Content, "Published interactive_web_skill candidates"); count != 1 {
 		t.Fatalf("expected one merged launch prompt, got %d", count)
+	}
+}
+
+func TestBuildIntentSystemMessageMarksRewriteMCPUnavailable(t *testing.T) {
+	msg := buildIntentSystemMessage(nil, false)
+	lower := strings.ToLower(msg.Content)
+	if !strings.Contains(lower, "currently unavailable") {
+		t.Fatalf("expected system prompt to declare unavailable rewrite MCP, got %q", msg.Content)
+	}
+	if !strings.Contains(lower, "do not mention ccbos mcp") {
+		t.Fatalf("expected system prompt to prohibit CCBOS MCP wording, got %q", msg.Content)
 	}
 }
 
@@ -130,6 +141,14 @@ func TestCanonicalizePlanGoalRebuildsSkillGeneratedGoalWhenLLMStillMentionsMCP(t
 	}
 }
 
+func TestCanonicalizePlanGoalRebuildsUnavailableClassicalRewriteTextWhenModeCleared(t *testing.T) {
+	got := canonicalizePlanGoal("围绕越狱攻击开展安全评测。经 CCBOS MCP 迭代优化改写为文言文形式。", []string{"jailbreak"}, "")
+	lower := strings.ToLower(got)
+	if strings.Contains(lower, "ccbos") || strings.Contains(lower, "mcp") || strings.Contains(got, "文言文") {
+		t.Fatalf("expected canonicalized goal to avoid unavailable rewrite wording, got %q", got)
+	}
+}
+
 func TestNormalizedPlanTextValueTreatsNilPlaceholdersAsEmpty(t *testing.T) {
 	for _, value := range []any{nil, "<nil>", " nil ", "null", "undefined"} {
 		if got := normalizedPlanTextValue(value); got != "" {
@@ -156,6 +175,18 @@ func TestCanonicalizePlanConfirmationMessageRebuildsSkillGeneratedMessageWhenLLM
 	got := canonicalizePlanConfirmationMessage("我会调用 CCBOS MCP 改写能力生成测试问题。", planInfo, []string{"jailbreak"}, false)
 	if strings.Contains(strings.ToLower(got), "mcp") {
 		t.Fatalf("expected canonicalized message to avoid MCP wording, got %q", got)
+	}
+}
+
+func TestCanonicalizePlanConfirmationMessageRebuildsUnavailableClassicalRewriteTextWhenModeCleared(t *testing.T) {
+	planInfo := map[string]any{
+		"resource_mode_preference": "",
+		"test_count":               20,
+	}
+	got := canonicalizePlanConfirmationMessage("我会调用 CCBOS MCP 迭代优化改写能力生成文言文测试问题。", planInfo, []string{"jailbreak"}, false)
+	lower := strings.ToLower(got)
+	if strings.Contains(lower, "ccbos") || strings.Contains(lower, "mcp") || strings.Contains(got, "文言文") {
+		t.Fatalf("expected canonicalized message to avoid unavailable rewrite wording, got %q", got)
 	}
 }
 

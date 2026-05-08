@@ -36,7 +36,7 @@ def main() -> int:
             report_path,
             {
                 "skill_name": "ccbos-classical-chinese-skill",
-                "skill_version": "1.2.0",
+                "skill_version": "1.3.0",
                 "run_type": "generate",
                 "all_passed": False,
                 "notes": [str(exc)],
