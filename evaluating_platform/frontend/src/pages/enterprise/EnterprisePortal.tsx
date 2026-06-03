@@ -1,28 +1,17 @@
 import { Routes, Route, Link, useLocation, useNavigate } from 'react-router-dom'
-import { Layout, Menu, Typography, Button, Badge, Avatar, Dropdown, Segmented } from 'antd'
+import { Layout, Menu, Typography, Button, Badge, Avatar, Dropdown } from 'antd'
 import { useEffect, useState } from 'react'
 import {
-  DashboardOutlined,
-  SafetyOutlined,
-  FileTextOutlined,
   SettingOutlined,
   LogoutOutlined,
   UserOutlined,
   BellOutlined,
-  ShopOutlined,
   WalletOutlined,
   RobotOutlined,
-  AppstoreOutlined,
 } from '@ant-design/icons'
-import { Dashboard } from './Dashboard'
-import { NewAssessment } from './NewAssessment'
-import { AssessmentList } from './AssessmentList'
-import { ReportView } from './ReportView'
 import { BillingPage } from './BillingPage'
-import { MarketPlace } from './MarketPlace'
 import { Settings } from './Settings'
 import { ChatPage } from './ChatPage'
-import { EnterpriseSkillOpen } from './EnterpriseSkillOpen'
 import { useAuth } from '../../context/AuthContext'
 import { billingService } from '../../services/billing'
 import appLogoUrl from '../../assets/qianxin-ai-security-logo.png'
@@ -31,31 +20,29 @@ const { Sider, Header, Content } = Layout
 const { Text } = Typography
 
 const menuItems = [
-  { key: '/enterprise/dashboard', icon: <DashboardOutlined />, label: '概览' },
-  { key: '/enterprise/assessments/new', icon: <SafetyOutlined />, label: '发起评估' },
-  { key: '/enterprise/assessments', icon: <FileTextOutlined />, label: '评估记录' },
-  { key: '/enterprise/market', icon: <ShopOutlined />, label: '资产市场' },
+  { key: '/enterprise', icon: <RobotOutlined />, label: 'AI 服务' },
   { key: '/enterprise/billing', icon: <WalletOutlined />, label: '计费管理' },
   { key: '/enterprise/settings', icon: <SettingOutlined />, label: '账户设置' },
 ]
-
-type Mode = 'classic' | 'ai'
 
 export function EnterprisePortal() {
   const location = useLocation()
   const navigate = useNavigate()
   const { user, logout } = useAuth()
   const [balance, setBalance] = useState<number | null>(null)
-  const [mode, setMode] = useState<Mode>('ai')
 
   useEffect(() => {
     billingService.getBalance().then(r => setBalance(r.balance)).catch(() => {})
   }, [])
 
-  const skillOpenMatch = location.pathname.match(/^\/enterprise\/skills\/([^/]+)\/open$/)
-  if (skillOpenMatch) {
-    return <EnterpriseSkillOpen skillId={skillOpenMatch[1]} />
-  }
+  useEffect(() => {
+    if (/^\/enterprise\/skills\/[^/]+\/open$/.test(location.pathname)) {
+      navigate('/enterprise', { replace: true })
+    }
+  }, [location.pathname, navigate])
+
+  const selectedKey = location.pathname === '/enterprise' ? '/enterprise' : location.pathname
+  const paddedContent = location.pathname === '/enterprise/billing' || location.pathname === '/enterprise/settings'
 
   const userMenu = [
     {
@@ -78,7 +65,8 @@ export function EnterprisePortal() {
           borderRight: '1px solid var(--border-color)',
           position: 'fixed',
           height: '100vh',
-          left: 0, top: 0,
+          left: 0,
+          top: 0,
           zIndex: 100,
         }}
       >
@@ -91,11 +79,14 @@ export function EnterprisePortal() {
           gap: 10,
         }}>
           <div style={{
-            width: 42, height: 42,
+            width: 42,
+            height: 42,
             borderRadius: '50%',
             background: 'transparent',
             overflow: 'hidden',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
           }}>
             <img
               src={appLogoUrl}
@@ -111,35 +102,18 @@ export function EnterprisePortal() {
           </div>
         </div>
 
-        {/* 模式切换 */}
-        <div style={{ padding: '12px 12px 4px' }}>
-          <Segmented
-            block
-            value={mode}
-            onChange={v => setMode(v as Mode)}
-            options={[
-              { value: 'ai', icon: <RobotOutlined />, label: 'AI 服务' },
-              { value: 'classic', icon: <AppstoreOutlined />, label: '传统服务' },
-            ]}
-            style={{ fontSize: 12 }}
-          />
-        </div>
+        <Menu
+          theme="dark"
+          mode="inline"
+          selectedKeys={[selectedKey]}
+          style={{ background: 'transparent', border: 'none', marginTop: 8 }}
+          items={menuItems.map(item => ({
+            key: item.key,
+            icon: item.icon,
+            label: <Link to={item.key}>{item.label}</Link>,
+          }))}
+        />
 
-        {mode === 'classic' && (
-          <Menu
-            theme="dark"
-            mode="inline"
-            selectedKeys={[location.pathname]}
-            style={{ background: 'transparent', border: 'none', marginTop: 4 }}
-            items={menuItems.map(item => ({
-              key: item.key,
-              icon: item.icon,
-              label: <Link to={item.key}>{item.label}</Link>,
-            }))}
-          />
-        )}
-
-        {/* 余额显示 */}
         <div style={{
           position: 'absolute',
           bottom: 20,
@@ -154,8 +128,13 @@ export function EnterprisePortal() {
           <div style={{ color: '#4d96ff', fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
             {balance !== null ? `¥ ${balance.toFixed(2)}` : '—'}
           </div>
-          <Button type="primary" size="small" block style={{ marginTop: 8, fontSize: 12 }}
-            onClick={() => navigate('/enterprise/billing')}>
+          <Button
+            type="primary"
+            size="small"
+            block
+            style={{ marginTop: 8, fontSize: 12 }}
+            onClick={() => navigate('/enterprise/billing')}
+          >
             充值
           </Button>
         </div>
@@ -183,7 +162,9 @@ export function EnterprisePortal() {
             </Badge>
             <Dropdown menu={{ items: userMenu }} placement="bottomRight">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                <Avatar size={32} icon={<UserOutlined />}
+                <Avatar
+                  size={32}
+                  icon={<UserOutlined />}
                   style={{ background: 'rgba(26, 109, 255, 0.2)', border: '1px solid rgba(26, 109, 255, 0.4)' }}
                 />
                 <Text style={{ color: 'var(--text-primary)', fontSize: 13 }}>
@@ -194,21 +175,12 @@ export function EnterprisePortal() {
           </div>
         </Header>
 
-        <Content style={{ padding: mode === 'ai' ? 0 : 24, minHeight: 'calc(100vh - 64px)' }}>
-          {mode === 'ai' ? (
-            <ChatPage />
-          ) : (
-            <Routes>
-              <Route path="dashboard" element={<Dashboard />} />
-              <Route path="assessments/new" element={<NewAssessment />} />
-              <Route path="assessments" element={<AssessmentList />} />
-              <Route path="reports/:id" element={<ReportView />} />
-              <Route path="market" element={<MarketPlace />} />
-              <Route path="billing" element={<BillingPage />} />
-              <Route path="settings" element={<Settings />} />
-              <Route path="*" element={<Dashboard />} />
-            </Routes>
-          )}
+        <Content style={{ padding: paddedContent ? 24 : 0, minHeight: 'calc(100vh - 64px)' }}>
+          <Routes>
+            <Route path="billing" element={<BillingPage />} />
+            <Route path="settings" element={<Settings />} />
+            <Route path="*" element={<ChatPage />} />
+          </Routes>
         </Content>
       </Layout>
     </Layout>

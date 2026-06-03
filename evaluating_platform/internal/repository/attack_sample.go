@@ -24,7 +24,9 @@ const sampleSelectCols = ` id, expert_id, sub_type, name, description, storage_p
 	sample_count, file_size, status, visibility,
 	created_at, updated_at `
 
-func scanSample(row interface{ Scan(dest ...interface{}) error }) (*model.AttackSample, error) {
+func scanSample(row interface {
+	Scan(dest ...interface{}) error
+}) (*model.AttackSample, error) {
 	var s model.AttackSample
 	err := row.Scan(
 		&s.ID, &s.ExpertID, &s.SubType, &s.Name, &s.Description,
@@ -119,17 +121,7 @@ func (r *AttackSampleRepository) Delete(ctx context.Context, id, expertID uuid.U
 
 // ListPublished 列出当前可用于评估编排的样本
 func (r *AttackSampleRepository) ListPublished(ctx context.Context, subType string, limit, offset int) ([]model.AttackSample, int, error) {
-	conds := []string{}
-	args := []interface{}{}
-
-	if subType != "" {
-		args = append(args, subType)
-		conds = append(conds, fmt.Sprintf("sub_type = $%d", len(args)))
-	}
-	where := ""
-	if len(conds) > 0 {
-		where = "WHERE " + strings.Join(conds, " AND ")
-	}
+	where, args := platformDataPublishedWhereClause("sub_type", subType, 0)
 
 	var total int
 	if err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM attack_samples "+where, args...).Scan(&total); err != nil {

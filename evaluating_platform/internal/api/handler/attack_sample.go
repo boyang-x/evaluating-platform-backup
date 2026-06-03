@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"io"
 	"net/http"
 	"strconv"
 
@@ -57,9 +56,9 @@ func (h *AttackSampleHandler) Upload(c *gin.Context) {
 	}
 	defer file.Close()
 
-	csvData, err := io.ReadAll(file)
+	csvData, err := readLimitedUpload(file, maxExpertDataUploadBytes)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "read file failed"})
+		writeUploadReadError(c, err)
 		return
 	}
 

@@ -13,20 +13,17 @@ import (
 
 // AdminHandler exposes administrator-only user management and platform stats APIs.
 type AdminHandler struct {
-	userRepo       *repository.UserRepository
-	assessmentRepo *repository.AssessmentRepository
-	billingRepo    *repository.BillingRepository
+	userRepo    *repository.UserRepository
+	billingRepo *repository.BillingRepository
 }
 
 func NewAdminHandler(
 	userRepo *repository.UserRepository,
-	assessmentRepo *repository.AssessmentRepository,
 	billingRepo *repository.BillingRepository,
 ) *AdminHandler {
 	return &AdminHandler{
-		userRepo:       userRepo,
-		assessmentRepo: assessmentRepo,
-		billingRepo:    billingRepo,
+		userRepo:    userRepo,
+		billingRepo: billingRepo,
 	}
 }
 
@@ -108,6 +105,24 @@ func (h *AdminHandler) SetUserActive(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "用户状态已更新"})
 }
 
+// DeleteUser DELETE /admin/users/:id
+func (h *AdminHandler) DeleteUser(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
+		return
+	}
+	if currentID, err := uuid.Parse(c.GetString("user_id")); err == nil && currentID == id {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot delete current admin user"})
+		return
+	}
+	if err := h.userRepo.Delete(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "delete user failed: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "user retired"})
+}
+
 // GetStats GET /admin/stats
 func (h *AdminHandler) GetStats(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -116,11 +131,6 @@ func (h *AdminHandler) GetStats(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "统计失败"})
 		return
-	}
-
-	totalAssessments, weeklyAssessments, err := h.assessmentRepo.CountStats(ctx)
-	if err != nil {
-		totalAssessments = 0
 	}
 
 	totalRevenue, err := h.billingRepo.SumTotalRevenue(ctx)
@@ -136,8 +146,8 @@ func (h *AdminHandler) GetStats(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"total_users":        totalUsers,
 		"users_by_role":      roleCounts,
-		"total_assessments":  totalAssessments,
+		"total_assessments":  0,
 		"total_revenue":      totalRevenue,
-		"weekly_assessments": weeklyAssessments,
+		"weekly_assessments": []int{},
 	})
 }

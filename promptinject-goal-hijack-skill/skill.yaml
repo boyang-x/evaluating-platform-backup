@@ -1,0 +1,28 @@
+name: promptinject-goal-hijack-skill
+description: Generate PromptInject-style goal hijacking, prompt leaking, delimiter injection, and long-context prompt-injection safety-evaluation payloads from expert samples or enterprise questions.
+version: "1.1.0"
+triggers:
+  - PromptInject
+  - prompt injection
+  - goal hijacking
+  - prompt leaking
+status: active
+type: executable
+mode: sequential
+global_timeout: 120
+platforms:
+  - universal
+produces_artifact: true
+params:
+  - name: input
+    description: JSON input path containing expert samples, sample questions, composed attacks, rewrite_request, or target goal.
+    required: false
+    default: examples/input.json
+  - name: output
+    description: JSON output path for the generated payload_dataset.
+    required: false
+    default: output.json
+steps:
+  - action: run
+    params:
+      command: python3 runtime/main.py --input {{input}} --output {{output}}

@@ -1,5 +1,3 @@
-import api from './api'
-
 export interface ChatSession {
   id: string
   user_id: string
@@ -35,17 +33,6 @@ export interface ChatMessage {
   created_at: string
 }
 
-export interface SkillLaunchDocument {
-  skill_id: string
-  skill_name: string
-  skill_slug: string
-  version_id: string
-  version: string
-  document_title: string
-  html: string
-  launch_mode: string
-}
-
 export interface PlanInfo {
   name: string
   goal: string
@@ -53,58 +40,25 @@ export interface PlanInfo {
   target_url: string
   target_key: string
   target_model: string
+  target_id?: string
   assessment_types: string[]
   resource_mode_preference?: string
+  resource_handles?: string[]
+  selected_skills?: string[]
+  selected_capability_refs?: string[]
+  selection_reasons?: string[]
+  selection_strategy?: string
   test_count?: number
 }
 
 export interface WelcomeCapability {
   id: string
   label: string
+  title?: string
   prompt: string
-  tone: 'attack' | 'governance' | 'engine' | 'tool'
-  source_kind: 'skill' | 'mcp' | 'resource'
+  tone?: 'attack' | 'governance' | 'engine' | 'tool'
+  source_kind?: 'skill' | 'mcp' | 'resource'
   source_type?: string
   description?: string
-}
-
-export const chatService = {
-  async createSession(): Promise<ChatSession> {
-    const res = await api.post('/chat/sessions')
-    return res.data
-  },
-
-  async listSessions(limit = 50, offset = 0): Promise<{ items: ChatSession[]; total: number }> {
-    const res = await api.get('/chat/sessions', { params: { limit, offset } })
-    return res.data
-  },
-
-  async getSession(id: string): Promise<{ session: ChatSession; messages: ChatMessage[] }> {
-    const res = await api.get(`/chat/sessions/${id}`)
-    return res.data
-  },
-
-  async sendMessage(sessionId: string, content: string): Promise<ChatMessage> {
-    const res = await api.post(`/chat/sessions/${sessionId}/messages`, { content })
-    return res.data
-  },
-
-  async confirmPlan(sessionId: string, testCount?: number): Promise<{ session: ChatSession; plan: PlanInfo }> {
-    const res = await api.post(`/chat/sessions/${sessionId}/confirm`, testCount ? { test_count: testCount } : {})
-    return res.data
-  },
-
-  async deleteSession(id: string): Promise<void> {
-    await api.delete(`/chat/sessions/${id}`)
-  },
-
-  async getSkillLaunchDocument(id: string): Promise<SkillLaunchDocument> {
-    const res = await api.get(`/enterprise/skills/${id}/launch`)
-    return res.data.item
-  },
-
-  async getWelcomeCapabilities(limit = 6): Promise<WelcomeCapability[]> {
-    const res = await api.get('/enterprise/welcome-capabilities', { params: { limit } })
-    return res.data.items || []
-  },
+  tags?: string[]
 }

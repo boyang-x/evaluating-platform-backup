@@ -1,17 +1,24 @@
 import { useEffect, useState } from 'react'
 import { Avatar, Button, InputNumber, Spin, message } from 'antd'
-import { ApiOutlined, BugOutlined, CheckCircleOutlined, DownloadOutlined, ExportOutlined, LoadingOutlined, RobotOutlined, SafetyOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
+import { ApiOutlined, BugOutlined, CheckCircleOutlined, DownloadOutlined, ExportOutlined, LoadingOutlined, PlayCircleOutlined, ReloadOutlined, RobotOutlined, SafetyOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
 
 import type { ChatMessage, PlanInfo, WelcomeCapability } from '../../services/chat'
 import { reportService, triggerBrowserDownload } from '../../services/report'
-import { LABELS, RESOURCE_MODE_LABELS, normalizePlanForDisplay, safetyScoreFromRiskScore } from './chatDisplay'
+import { LABELS, RESOURCE_MODE_LABELS, normalizePlanForDisplay, resolveReportSafetyScore } from './chatDisplay'
+import { parseChatMarkdown, type ChatMarkdownInline } from './chatMarkdown'
 
 const RISK_COLORS: Record<string, string> = {
   critical: '#cf1322',
   high: '#ff4d4f',
+  高风险: '#ff4d4f',
   medium: '#fa8c16',
+  中风险: '#fa8c16',
   low: '#52c41a',
+  低风险: '#52c41a',
   info: '#69db7c',
+  safe: '#69db7c',
+  最高安全: '#69db7c',
+  安全: '#69db7c',
 }
 
 const RISK_LABELS: Record<string, string> = {
@@ -20,6 +27,19 @@ const RISK_LABELS: Record<string, string> = {
   medium: '中风险',
   low: '低风险',
   info: '未发现明显风险',
+  safe: '最高安全',
+  最高安全: '最高安全',
+  安全: '最高安全',
+  高风险: '高风险',
+  中风险: '中风险',
+  低风险: '低风险',
+}
+
+const SELECTION_STRATEGY_LABELS: Record<string, string> = {
+  random: '随机抽取',
+  sequential: '顺序抽取',
+  risk_coverage: '按风险覆盖',
+  maclaw_selected: 'MaClaw 自主选择',
 }
 
 function capabilityVisual(item: WelcomeCapability) {
@@ -35,13 +55,41 @@ function capabilityVisual(item: WelcomeCapability) {
   }
 }
 
-function PlanConfirmCard({ plan, onConfirm, confirmed }: { plan: PlanInfo; onConfirm: (count: number) => void; confirmed: boolean }) {
+function displayCapabilityName(ref: string) {
+  const text = String(ref || '').trim()
+  if (!text) return ''
+  const lower = text.toLowerCase()
+  if (lower.includes('ccbos') || lower.includes('classical-chinese')) return 'CCBOS 文言文改写 Skill'
+  if (lower.startsWith('skillhub:')) return text.replace(/^skillhub:/i, 'Hub Skill: ')
+  if (lower.startsWith('sample:')) return `专家样本 ${text.slice(0, 18)}`
+  if (lower.startsWith('template:')) return `专家模板 ${text.slice(0, 20)}`
+  if (lower.startsWith('composed_attack:')) return `已组合攻击 ${text.slice(0, 24)}`
+  return text
+}
+
+function PlanConfirmCard({
+  plan,
+  onConfirm,
+  confirmed,
+  confirmedTestCount,
+}: {
+  plan: PlanInfo
+  onConfirm: (count: number) => void
+  confirmed: boolean
+  confirmedTestCount?: number
+}) {
   const normalizedPlan = normalizePlanForDisplay(plan)
-  const [testCount, setTestCount] = useState(normalizedPlan.test_count ?? 20)
+  const [testCount, setTestCount] = useState(confirmedTestCount ?? normalizedPlan.test_count ?? 20)
 
   useEffect(() => {
-    setTestCount(normalizedPlan.test_count ?? 20)
-  }, [plan, normalizedPlan.test_count])
+    if (confirmed && confirmedTestCount) {
+      setTestCount(confirmedTestCount)
+      return
+    }
+    if (!confirmed) {
+      setTestCount(normalizedPlan.test_count ?? 20)
+    }
+  }, [confirmed, confirmedTestCount, normalizedPlan.test_count])
 
   const rows: [string, string][] = [
     ['任务名称', normalizedPlan.name],
@@ -51,10 +99,16 @@ function PlanConfirmCard({ plan, onConfirm, confirmed }: { plan: PlanInfo; onCon
   if (normalizedPlan.target_url) rows.push(['目标地址', normalizedPlan.target_url])
   if (normalizedPlan.target_model) rows.push(['模型', normalizedPlan.target_model])
   rows.push(['资源模式', RESOURCE_MODE_LABELS[normalizedPlan.resource_mode_preference || ''] || '自动选择'])
+  if (normalizedPlan.selection_strategy) rows.push(['选择策略', SELECTION_STRATEGY_LABELS[normalizedPlan.selection_strategy] || normalizedPlan.selection_strategy])
+  const selectedCapabilities = [...new Set([
+    ...(normalizedPlan.selected_skills || []),
+    ...(normalizedPlan.selected_capability_refs || []),
+    ...(normalizedPlan.resource_handles || []),
+  ].map(displayCapabilityName).filter(Boolean))]
 
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid rgba(26,109,255,0.3)', borderRadius: 12, padding: '16px 20px', maxWidth: 500, marginTop: 8 }}>
-      <div style={{ color: '#4d96ff', fontWeight: 600, marginBottom: 12, fontSize: 14 }}>📋 评估计划</div>
+      <div style={{ color: '#4d96ff', fontWeight: 600, marginBottom: 12, fontSize: 14 }}>执行确认</div>
       <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
         {rows.map(([label, value]) => (
           <div key={label} style={{ display: 'flex', gap: 8, fontSize: 13 }}>
@@ -72,6 +126,26 @@ function PlanConfirmCard({ plan, onConfirm, confirmed }: { plan: PlanInfo; onCon
             ))}
           </div>
         </div>
+        {selectedCapabilities.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, fontSize: 13, alignItems: 'flex-start' }}>
+            <span style={{ color: 'var(--text-muted)', minWidth: 70 }}>使用能力</span>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {selectedCapabilities.map(item => (
+                <span key={item} style={{ background: 'rgba(105,219,124,0.12)', color: '#69db7c', padding: '2px 8px', borderRadius: 4, fontSize: 12 }}>
+                  {item}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+        {(normalizedPlan.selection_reasons || []).length > 0 && (
+          <div style={{ display: 'flex', gap: 8, fontSize: 13, alignItems: 'flex-start' }}>
+            <span style={{ color: 'var(--text-muted)', minWidth: 70 }}>选择理由</span>
+            <span style={{ color: 'var(--text-primary)', lineHeight: 1.6 }}>
+              {(normalizedPlan.selection_reasons || []).slice(0, 3).join('；')}
+            </span>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
           <span style={{ color: 'var(--text-muted)', minWidth: 70 }}>测试问题数</span>
           <InputNumber min={1} max={2000} value={testCount} onChange={(value) => setTestCount(typeof value === 'number' ? value : 20)} disabled={confirmed} size="small" />
@@ -94,35 +168,77 @@ function PlanConfirmCard({ plan, onConfirm, confirmed }: { plan: PlanInfo; onCon
 function ReportCard({
   cardType,
   assessmentId,
+  reportId,
   riskLevel,
   riskScore,
-  summary,
+  safetyScore: directSafetyScore,
+  downloadFormat = 'pdf',
+  downloadable = true,
   isRunning,
   statusText,
   phase,
   executedCount,
   plannedCount,
+  successCount,
+  failureCount,
+  jobId,
+  recoveryAction,
+  recoveryStrategy,
+  restartInterrupted,
+  canResume,
+  resumeStarted,
+  resumeJobId,
+  resuming,
+  onResumeJob,
+  retryStarted,
+  retryJobId,
+  retrying,
+  onRetryJob,
 }: {
   cardType?: string
   assessmentId?: string
+  reportId?: string
   riskLevel?: string
   riskScore?: number
-  summary?: string
+  safetyScore?: number
+  downloadFormat?: 'pdf' | 'markdown' | 'json'
+  downloadable?: boolean
   isRunning?: boolean
   statusText?: string
   phase?: string
   executedCount?: number
   plannedCount?: number
+  successCount?: number
+  failureCount?: number
+  jobId?: string
+  recoveryAction?: string
+  recoveryStrategy?: string
+  restartInterrupted?: boolean
+  canResume?: boolean
+  resumeStarted?: boolean
+  resumeJobId?: string
+  resuming?: boolean
+  onResumeJob?: (jobId: string) => void
+  retryStarted?: boolean
+  retryJobId?: string
+  retrying?: boolean
+  onRetryJob?: (jobId: string) => void
 }) {
   const [downloading, setDownloading] = useState(false)
-  const safetyScore = safetyScoreFromRiskScore(riskScore)
+  const safetyScore = resolveReportSafetyScore({
+    cardType,
+    directSafetyScore,
+    riskScore,
+  })
 
   const handleDownload = async () => {
-    if (!assessmentId) return
+    if (!reportId) return
     setDownloading(true)
     try {
-      const blob = await reportService.downloadPDF(assessmentId)
-      triggerBrowserDownload(blob, `report-${assessmentId}.pdf`)
+      const blob = await reportService.downloadMaclawReport(reportId, downloadFormat)
+      const ext = downloadFormat === 'json' ? 'json' : downloadFormat === 'markdown' ? 'md' : 'pdf'
+      const fallbackType = downloadFormat === 'json' ? 'application/json' : downloadFormat === 'markdown' ? 'text/markdown;charset=utf-8' : 'application/pdf'
+      triggerBrowserDownload(blob, `maclaw-report-${reportId}.${ext}`, fallbackType)
     } catch {
       message.error('PDF 下载失败，请稍后重试')
     } finally {
@@ -130,10 +246,21 @@ function ReportCard({
     }
   }
 
-  if (cardType === 'report' && assessmentId) {
-    const normalizedRiskLevel = (riskLevel || '').toLowerCase()
-    const color = RISK_COLORS[normalizedRiskLevel] || '#4d96ff'
-    const label = RISK_LABELS[normalizedRiskLevel] || riskLevel || '未知'
+  if (cardType === 'report') {
+    const normalizedRiskLevel = (riskLevel || '').trim()
+    const normalizedRiskKey = normalizedRiskLevel.toLowerCase()
+    const color = RISK_COLORS[normalizedRiskLevel] || RISK_COLORS[normalizedRiskKey] || '#69db7c'
+    const label = RISK_LABELS[normalizedRiskLevel] || RISK_LABELS[normalizedRiskKey] || riskLevel || '最高安全'
+    const resolvedFailureCount = typeof failureCount === 'number'
+      ? failureCount
+      : typeof executedCount === 'number' && typeof successCount === 'number'
+        ? Math.max(0, executedCount - successCount)
+        : undefined
+    const stats = [
+      ['执行', executedCount],
+      ['成功', successCount],
+      ['失败', resolvedFailureCount],
+    ].filter(([, value]) => typeof value === 'number')
     return (
       <div style={{ background: 'var(--bg-card)', border: `1px solid ${color}40`, borderRadius: 12, padding: '16px 20px', maxWidth: 420, marginTop: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
@@ -143,31 +270,53 @@ function ReportCard({
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
           <span style={{ background: color, color: '#fff', padding: '2px 10px', borderRadius: 4, fontSize: 12, fontWeight: 500 }}>{label}</span>
           <span style={{ color: 'var(--text-primary)', fontSize: 20, fontWeight: 700 }}>
-            {safetyScore}
+            {typeof safetyScore === 'number' ? safetyScore : '--'}
             <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 2 }}>安全分</span>
           </span>
         </div>
-        {summary && <div style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6, marginBottom: 12 }}>{summary}</div>}
-        <Button type="primary" icon={<DownloadOutlined />} size="small" loading={downloading} onClick={handleDownload}>
-          下载 PDF 报告
-        </Button>
+        {stats.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${stats.length}, minmax(0, 1fr))`, gap: 6, marginBottom: 12 }}>
+            {stats.map(([labelText, value]) => (
+              <div key={labelText as string} style={{ border: '1px solid var(--border-color)', borderRadius: 6, padding: '6px 4px', textAlign: 'center', background: 'rgba(255,255,255,0.02)' }}>
+                <div style={{ color: 'var(--text-primary)', fontSize: 14, fontWeight: 700 }}>{value as number}</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 2 }}>{labelText as string}</div>
+              </div>
+            ))}
+          </div>
+        )}
+        {(assessmentId || reportId) && downloadable && (
+          <Button type="primary" icon={<DownloadOutlined />} size="small" loading={downloading} onClick={handleDownload}>
+            {reportId ? '下载报告' : '下载 PDF 报告'}
+          </Button>
+        )}
       </div>
     )
   }
 
   if (cardType === 'progress') {
-    const phaseLabel = phase === 'reporting'
-      ? '正在生成报告'
-      : phase === 'executed'
-        ? '测试已完成'
-        : phase === 'starting'
-          ? '初始化评估'
-          : '正在执行测试'
-    const showSpinner = isRunning && phase !== 'executed'
+    const isFailed = phase === 'failed' || phase === 'canceled'
+    const canResumeJob = isFailed && Boolean(jobId) && (canResume || recoveryAction === 'resume') && !resumeStarted
+    const canRetry = isFailed && Boolean(jobId) && recoveryAction === 'retry' && !retryStarted && !resumeStarted
+    const needsReview = isFailed && Boolean(restartInterrupted) && recoveryAction !== 'retry' && recoveryAction !== 'resume'
+    const retryStartedText = retryJobId ? `已发起重试任务：${retryJobId}` : '已发起重试任务。'
+    const resumeStartedText = resumeJobId ? `已发起恢复任务：${resumeJobId}` : '已发起恢复任务。'
+    const phaseLabel = phase === 'failed'
+      ? '评估任务未完成'
+      : phase === 'canceled'
+        ? '评估任务已取消'
+        : phase === 'reporting'
+          ? '正在生成报告'
+          : phase === 'executed'
+            ? '测试已完成'
+            : phase === 'starting'
+              ? '初始化评估'
+              : '正在执行测试'
+    const showSpinner = isRunning && phase !== 'executed' && !isFailed
+    const borderColor = isFailed ? 'rgba(255,77,79,0.35)' : 'rgba(105,219,124,0.3)'
     return (
-      <div style={{ background: 'var(--bg-card)', border: '1px solid rgba(105,219,124,0.3)', borderRadius: 12, padding: '14px 18px', maxWidth: 420, marginTop: 8 }}>
+      <div style={{ background: 'var(--bg-card)', border: `1px solid ${borderColor}`, borderRadius: 12, padding: '14px 18px', maxWidth: 420, marginTop: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
-          {showSpinner ? <Spin indicator={<LoadingOutlined style={{ color: '#4d96ff' }} />} /> : <CheckCircleOutlined style={{ color: '#69db7c', fontSize: 18 }} />}
+          {showSpinner ? <Spin indicator={<LoadingOutlined style={{ color: '#4d96ff' }} />} /> : <CheckCircleOutlined style={{ color: isFailed ? '#ff4d4f' : '#69db7c', fontSize: 18 }} />}
           <div>
             <div style={{ color: 'var(--text-primary)', fontSize: 14, fontWeight: 600 }}>{phaseLabel}</div>
             <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{statusText || '评估任务执行中，请稍候...'}</div>
@@ -179,6 +328,30 @@ function ReportCard({
               已执行 {typeof executedCount === 'number' ? executedCount : 0}/{plannedCount} 条
             </span>
             {phase === 'reporting' && <span>测试已完成，报告生成后会自动提供下载卡片。</span>}
+          </div>
+        )}
+        {isFailed && (canResumeJob || canRetry || needsReview || retryStarted || resumeStarted) && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+            {(canResumeJob || resumeStarted) && (
+              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                {resumeStarted ? resumeStartedText : '该任务可继续恢复。'}
+              </span>
+            )}
+            {!(canResumeJob || resumeStarted) && (
+            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+              {retryStarted ? retryStartedText : canRetry ? '该任务可安全重试。' : `需要人工复核${recoveryStrategy ? `：${recoveryStrategy}` : '。'}`}
+            </span>
+            )}
+            {canResumeJob && jobId && (
+              <Button size="small" type="primary" icon={<PlayCircleOutlined />} loading={resuming} onClick={() => onResumeJob?.(jobId)}>
+                继续恢复
+              </Button>
+            )}
+            {canRetry && jobId && (
+              <Button size="small" type="primary" icon={<ReloadOutlined />} loading={retrying} onClick={() => onRetryJob?.(jobId)}>
+                重试
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -200,6 +373,65 @@ function SkillLaunchCard({ skillName, openUrl }: { skillName?: string; openUrl?:
       <Button type="primary" icon={<ExportOutlined />} size="small" onClick={() => window.open(openUrl, '_blank', 'noopener,noreferrer')}>
         新标签页打开
       </Button>
+    </div>
+  )
+}
+
+function renderMarkdownInline(parts: ChatMarkdownInline[], keyPrefix: string) {
+  return parts.map((part, index) => {
+    const key = `${keyPrefix}-${index}`
+    if (part.code) {
+      return (
+        <code key={key} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 4, padding: '1px 5px', fontSize: '0.92em' }}>
+          {part.text}
+        </code>
+      )
+    }
+    if (part.strong) return <strong key={key}>{part.text}</strong>
+    if (part.emphasis) return <em key={key}>{part.text}</em>
+    return <span key={key}>{part.text}</span>
+  })
+}
+
+function ChatMarkdown({ content, enabled }: { content: string; enabled: boolean }) {
+  if (!enabled) return <>{content}</>
+  const blocks = parseChatMarkdown(content)
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      {blocks.map((block, index) => {
+        const key = `md-${index}`
+        if (block.type === 'heading') {
+          const fontSize = block.level === 1 ? 17 : block.level === 2 ? 16 : 15
+          return (
+            <div key={key} style={{ color: 'var(--text-primary)', fontSize, fontWeight: 700, lineHeight: 1.45, marginTop: index === 0 ? 0 : 4 }}>
+              {renderMarkdownInline(block.children, key)}
+            </div>
+          )
+        }
+        if (block.type === 'list') {
+          return (
+            <ul key={key} style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 4 }}>
+              {block.items.map((item, itemIndex) => (
+                <li key={`${key}-${itemIndex}`} style={{ paddingLeft: 2 }}>
+                  {renderMarkdownInline(item, `${key}-${itemIndex}`)}
+                </li>
+              ))}
+            </ul>
+          )
+        }
+        if (block.type === 'code_block') {
+          return (
+            <pre key={key} style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: 'rgba(0,0,0,0.24)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '8px 10px', fontSize: 12, lineHeight: 1.6 }}>
+              <code>{block.text}</code>
+            </pre>
+          )
+        }
+        return (
+          <div key={key} style={{ whiteSpace: 'pre-wrap' }}>
+            {renderMarkdownInline(block.children, key)}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -252,17 +484,40 @@ export function TypingIndicator() {
 export function MessageBubble({
   msg,
   onPlanConfirm,
+  onQuickReply,
   confirmedMsgs,
+  confirmedTestCounts,
   isRunning,
+  onResumeJob,
+  resumingJobIds,
+  onRetryJob,
+  retryingJobIds,
 }: {
   msg: ChatMessage
-  onPlanConfirm: (count: number) => void
+  onPlanConfirm: (count: number, planMessageId: string) => void
+  onQuickReply?: (text: string) => void
   confirmedMsgs: Set<string>
+  confirmedTestCounts: Record<string, number>
   isRunning: boolean
+  onResumeJob: (jobId: string, sessionId: string) => void
+  resumingJobIds: Set<string>
+  onRetryJob: (jobId: string, sessionId: string) => void
+  retryingJobIds: Set<string>
 }) {
   const isUser = msg.role === 'user'
   const cardType = msg.metadata?.card_type
-  const hideTextBubble = !isUser && (cardType === 'progress' || cardType === 'report' || cardType === 'skill_launch')
+  const isStalePlan = msg.metadata?.plan_stale === true || msg.metadata?.plan_stale === 'true'
+  const hideTextBubble = !isUser && (cardType === 'plan_confirm' || cardType === 'progress' || cardType === 'report' || cardType === 'skill_launch')
+  const askUserOptions = (() => {
+    const raw = msg.metadata?.ask_user_options_json
+    if (typeof raw !== 'string' || !raw.trim()) return []
+    try {
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : []
+    } catch {
+      return []
+    }
+  })()
 
   return (
     <div style={{ display: 'flex', flexDirection: isUser ? 'row-reverse' : 'row', gap: 10, marginBottom: 20, alignItems: 'flex-start' }}>
@@ -270,24 +525,56 @@ export function MessageBubble({
       <div style={{ maxWidth: '72%' }}>
         {msg.content && !hideTextBubble && (
           <div style={{ background: isUser ? 'rgba(26,109,255,0.15)' : 'var(--bg-card)', border: `1px solid ${isUser ? 'rgba(26,109,255,0.3)' : 'var(--border-color)'}`, borderRadius: isUser ? '12px 4px 12px 12px' : '4px 12px 12px 12px', padding: '10px 14px', color: 'var(--text-primary)', fontSize: 14, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {msg.content}
+            <ChatMarkdown content={msg.content} enabled={!isUser} />
           </div>
         )}
         {cardType === 'plan_confirm' && !isUser && msg.metadata?.plan && (
-          <PlanConfirmCard plan={msg.metadata.plan as PlanInfo} onConfirm={onPlanConfirm} confirmed={confirmedMsgs.has(msg.id)} />
+          <PlanConfirmCard
+            plan={msg.metadata.plan as PlanInfo}
+            onConfirm={(count) => onPlanConfirm(count, msg.id)}
+            confirmed={confirmedMsgs.has(msg.id) || isStalePlan}
+            confirmedTestCount={confirmedTestCounts[msg.id]}
+          />
+        )}
+        {msg.metadata?.response_source === 'ask_user' && askUserOptions.length > 0 && !isUser && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+            {askUserOptions.map(option => (
+              <Button key={option} size="small" onClick={() => onQuickReply?.(option)} disabled={isRunning}>
+                {option}
+              </Button>
+            ))}
+          </div>
         )}
         {(cardType === 'progress' || cardType === 'report') && !isUser && (
           <ReportCard
             cardType={cardType}
             assessmentId={msg.metadata?.assessment_id as string | undefined}
+            reportId={msg.metadata?.report_id as string | undefined}
             riskLevel={msg.metadata?.risk_level as string | undefined}
             riskScore={msg.metadata?.risk_score as number | undefined}
-            summary={msg.metadata?.summary as string | undefined}
+            safetyScore={msg.metadata?.safety_score as number | undefined}
+            downloadFormat={msg.metadata?.download_format as 'pdf' | 'markdown' | 'json' | undefined}
+            downloadable={msg.metadata?.downloadable as boolean | undefined}
             statusText={msg.metadata?.status_text as string | undefined}
             phase={msg.metadata?.phase as string | undefined}
             executedCount={msg.metadata?.executed_count as number | undefined}
             plannedCount={msg.metadata?.planned_count as number | undefined}
+            successCount={msg.metadata?.success_count as number | undefined}
+            failureCount={msg.metadata?.failure_count as number | undefined}
             isRunning={isRunning}
+            jobId={msg.metadata?.job_id as string | undefined}
+            recoveryAction={msg.metadata?.recovery_action as string | undefined}
+            recoveryStrategy={msg.metadata?.recovery_strategy as string | undefined}
+            restartInterrupted={msg.metadata?.restart_interrupted as boolean | undefined}
+            canResume={msg.metadata?.can_resume as boolean | undefined}
+            resumeStarted={msg.metadata?.resume_started as boolean | undefined}
+            resumeJobId={msg.metadata?.resume_job_id as string | undefined}
+            resuming={resumingJobIds.has(msg.metadata?.job_id as string)}
+            onResumeJob={(jobId) => onResumeJob(jobId, msg.session_id)}
+            retryStarted={msg.metadata?.retry_started as boolean | undefined}
+            retryJobId={msg.metadata?.retry_job_id as string | undefined}
+            retrying={retryingJobIds.has(msg.metadata?.job_id as string)}
+            onRetryJob={(jobId) => onRetryJob(jobId, msg.session_id)}
           />
         )}
         {cardType === 'skill_launch' && !isUser && (

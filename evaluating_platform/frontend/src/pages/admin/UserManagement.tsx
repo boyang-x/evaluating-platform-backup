@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import {
-  Table, Tag, Typography, Input, Select, Space, Switch, message
+  Button, Popconfirm, Table, Tag, Typography, Input, Select, Space, Switch, message
 } from 'antd'
-import { SearchOutlined } from '@ant-design/icons'
+import { DeleteOutlined, SearchOutlined } from '@ant-design/icons'
 import { adminService } from '../../services/admin'
 import type { User } from '../../services/auth'
 
@@ -65,6 +65,16 @@ export function UserManagement() {
     }
   }
 
+  const handleDeleteUser = async (id: string) => {
+    try {
+      await adminService.deleteUser(id)
+      message.success('用户已删除')
+      loadUsers()
+    } catch (err: unknown) {
+      message.error((err as Error).message || '删除失败')
+    }
+  }
+
   const columns = [
     {
       title: '邮箱',
@@ -120,6 +130,21 @@ export function UserManagement() {
       title: '注册时间',
       dataIndex: 'created_at',
       render: (v: string) => <Text style={{ color: 'var(--text-muted)', fontSize: 12 }}>{v?.slice(0, 10)}</Text>,
+    },
+    {
+      title: '操作',
+      render: (_: unknown, r: User) => (
+        <Popconfirm
+          title="删除用户"
+          description="将删除该平台账号，并级联清理其 maclaw 映射和资源索引。此操作不可撤销。"
+          okText="删除"
+          cancelText="取消"
+          okButtonProps={{ danger: true }}
+          onConfirm={() => handleDeleteUser(r.id)}
+        >
+          <Button danger size="small" icon={<DeleteOutlined />}>删除</Button>
+        </Popconfirm>
+      ),
     },
   ]
 

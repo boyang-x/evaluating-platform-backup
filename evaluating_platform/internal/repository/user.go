@@ -133,7 +133,7 @@ func (r *UserRepository) UpdateBalance(ctx context.Context, userID uuid.UUID, de
 
 // ListAll 分页查询所有用户，支持按 role 和关键词过滤
 func (r *UserRepository) ListAll(ctx context.Context, limit, offset int, role, keyword string) ([]*model.User, int, error) {
-	conds := []string{"1=1"}
+	conds := []string{"email NOT LIKE 'deleted-%@deleted.local'"}
 	args := []interface{}{}
 
 	if role != "" {
@@ -210,9 +210,39 @@ func (r *UserRepository) SetActive(ctx context.Context, id uuid.UUID, active boo
 	return nil
 }
 
-// CountByRole 统计各角色用户数
+// Delete removes a platform user from the active management surface. Most
+// platform-owned data cascades from users(id); legacy billing and audit rows
+// are cleaned first because those historical tables intentionally predate
+// cascade semantics.
+func (r *UserRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin delete user: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, "DELETE FROM billing_records WHERE user_id = $1 OR expert_id = $1", id); err != nil {
+		return fmt.Errorf("delete user billing records: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "DELETE FROM balance_transactions WHERE user_id = $1", id); err != nil {
+		return fmt.Errorf("delete user balance transactions: %w", err)
+	}
+	if _, err := tx.Exec(ctx, "DELETE FROM audit_logs WHERE user_id = $1", id); err != nil {
+		return fmt.Errorf("delete user audit logs: %w", err)
+	}
+	tag, err := tx.Exec(ctx, "DELETE FROM users WHERE id = $1", id)
+	if err != nil {
+		return fmt.Errorf("delete user: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("user not found")
+	}
+	return tx.Commit(ctx)
+}
+
+// CountByRole counts users grouped by role.
 func (r *UserRepository) CountByRole(ctx context.Context) (map[string]int, error) {
-	rows, err := r.pool.Query(ctx, "SELECT role, COUNT(*) FROM users GROUP BY role")
+	rows, err := r.pool.Query(ctx, "SELECT role, COUNT(*) FROM users WHERE email NOT LIKE 'deleted-%@deleted.local' GROUP BY role")
 	if err != nil {
 		return nil, fmt.Errorf("count by role: %w", err)
 	}

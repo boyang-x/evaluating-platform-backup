@@ -1,0 +1,15 @@
+services:
+  maclaw-runtime:
+    profiles:
+      - local-maclaw
+
+  backend:
+    depends_on: !override
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      MACLAW_RUNTIME_KIND: "maclawsrv"
+      MACLAW_RUNTIME_MODE: "external"
+      MACLAW_BASE_URL: "${MACLAW_BASE_URL:-http://host.docker.internal:18080}"

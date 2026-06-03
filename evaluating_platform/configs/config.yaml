@@ -1,9 +1,9 @@
 server:
   port: 8080
-  mode: debug   # debug | release
+  mode: debug
 
 llm:
-  provider: openai           # openai-compatible
+  provider: openai
   base_url: "https://api.deepseek.com/v1"
   api_key: "${LLM_API_KEY}"
   model: "deepseek-chat"
@@ -14,7 +14,7 @@ database:
   dsn: "host=postgres user=postgres password=postgres dbname=evaluating_platform port=5432 sslmode=disable client_encoding=UTF8"
   max_conns: 20
   min_conns: 2
-  migrate_on_start: true   # 启动时自动执行迁移
+  migrate_on_start: true
 
 redis:
   addr: "redis:6379"
@@ -28,26 +28,26 @@ storage:
   bucket: "evaluating-platform"
   use_ssl: false
 
-agent:
-  max_iterations: 20
-  timeout_seconds: 300
-  tool_timeout_seconds: 15
-
 auth:
   jwt_secret: "${JWT_SECRET}"
   token_expiry_hours: 24
 
 billing:
-  mode: prepaid              # prepaid | postpaid
-  expert_share_rate: 0.3    # 专家获得调用费用的 30%
+  mode: prepaid
+  expert_share_rate: 0.3
 
-mcp:
-  port: 18080               # MCP SSE Server 监听端口
-
-skill:
-  runner_base_url: "http://skill_runner:8091"
-  runner_timeout_seconds: 300
+maclaw:
+  base_url: "http://maclaw-runtime:18080"
+  runtime_kind: "maclawsrv"
+  runtime_mode: "compose"
+  capability_profile: "shadow"
+  admin_secret: "${MACLAW_ADMIN_SECRET}"
+  provisioning_enabled: true
+  timeout_seconds: 360
+  redteam_mcp_endpoint: "${MACLAW_REDTEAM_MCP_ENDPOINT}"
+  redteam_mcp_secret: "${MACLAW_REDTEAM_MCP_SECRET}"
+  redteam_target_concurrency: 5
 
 crypto:
-  master_key: "${CRYPTO_MASTER_KEY}"  # 32字节 hex 编码的 AES-256 密钥
+  master_key: "${CRYPTO_MASTER_KEY}"
   key_id: "v1"

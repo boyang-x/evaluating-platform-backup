@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"io"
 	"net/http"
 	"strconv"
 
@@ -41,9 +40,12 @@ func (h *ComposedAttackHandler) Upload(c *gin.Context) {
 	name := c.PostForm("name")
 	description := c.PostForm("description")
 
-	if subType == "" || name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sub_type and name are required"})
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
 		return
+	}
+	if subType == "" {
+		subType = "ready_to_run"
 	}
 
 	file, _, err := c.Request.FormFile("file")
@@ -53,9 +55,9 @@ func (h *ComposedAttackHandler) Upload(c *gin.Context) {
 	}
 	defer file.Close()
 
-	csvData, err := io.ReadAll(file)
+	csvData, err := readLimitedUpload(file, maxExpertDataUploadBytes)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "read file failed"})
+		writeUploadReadError(c, err)
 		return
 	}
 

@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"io"
 	"net/http"
 	"strconv"
 
@@ -145,44 +144,55 @@ func (h *TemplateHandler) UploadCSV(c *gin.Context) {
 	subType := c.PostForm("sub_type")
 	name := c.PostForm("name")
 
-	if subType == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sub_type is required"})
-		return
-	}
 	if name == "" {
-		name = "CSV template batch"
+		name = "template batch"
 	}
 
-	file, _, err := c.Request.FormFile("file")
+	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
 		return
 	}
 	defer file.Close()
 
-	csvData, err := io.ReadAll(file)
+	fileData, err := readLimitedUpload(file, maxExpertDataUploadBytes)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "read file failed"})
+		writeUploadReadError(c, err)
 		return
 	}
 
-	rows, err := sample.ParseTwoColumnCSV(csvData)
+	templateRows, err := sample.ParseTemplateRows(fileData, header.Filename)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
+		if subType == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		legacyRows, legacyErr := sample.ParseTwoColumnCSV(fileData)
+		if legacyErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		templateRows = make([]sample.TemplateRow, 0, len(legacyRows))
+		for _, row := range legacyRows {
+			templateRows = append(templateRows, sample.TemplateRow{
+				Index:    row.Index,
+				Category: subType,
+				Content:  row.Data,
+			})
+		}
 	}
 
 	batchID := uuid.New()
-	created := make([]uuid.UUID, 0, len(rows))
-	for _, row := range rows {
+	created := make([]uuid.UUID, 0, len(templateRows))
+	for _, row := range templateRows {
 		tpl := &model.Template{
 			ID:              uuid.New(),
 			ExpertID:        expertID,
 			UploadBatchID:   batchID,
 			UploadBatchName: name,
-			SubType:         subType,
+			SubType:         row.Category,
 			Name:            name,
-			Content:         row.Data,
+			Content:         row.Content,
 			Status:          "published",
 			Visibility:      "public",
 		}

@@ -9,7 +9,6 @@ import {
   Modal,
   Popconfirm,
   Row,
-  Select,
   Space,
   Tag,
   Typography,
@@ -25,6 +24,7 @@ import { expertService } from '../../services/expert'
 
 const { Paragraph, Text } = Typography
 const { TextArea } = Input
+const DEFAULT_COMPOSED_ATTACK_TYPE = 'ready_to_run'
 
 interface ComposedAttackRecord {
   id: string
@@ -40,13 +40,6 @@ interface ComposedAttackRecord {
 interface Payload {
   index: number
   data: string
-}
-
-const subTypeLabel: Record<string, string> = {
-  direct_injection: '直接注入',
-  malicious_instruction: '恶意指令',
-  compliance_detection: '合规检测',
-  malicious_poisoning: '恶意投毒',
 }
 
 function formatDate(value?: string) {
@@ -81,14 +74,13 @@ export function ComposedAttackManager() {
   const [showUpload, setShowUpload] = useState(false)
   const [previewData, setPreviewData] = useState<Payload[] | null>(null)
   const [previewName, setPreviewName] = useState('')
-  const [filterType, setFilterType] = useState<string>('')
   const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({})
   const [form] = Form.useForm()
 
   const loadItems = () => {
     setLoading(true)
     expertService
-      .listComposedAttacks({ sub_type: filterType || undefined, limit: 100 })
+      .listComposedAttacks({ limit: 100 })
       .then((res) => setItems(res.items || []))
       .catch(() => message.error('加载已组合攻击失败'))
       .finally(() => setLoading(false))
@@ -96,13 +88,13 @@ export function ComposedAttackManager() {
 
   useEffect(() => {
     loadItems()
-  }, [filterType])
+  }, [])
 
   const handleUpload = async () => {
     try {
       const values = await form.validateFields()
       const formData = new FormData()
-      formData.append('sub_type', values.sub_type)
+      formData.append('sub_type', DEFAULT_COMPOSED_ATTACK_TYPE)
       formData.append('name', values.name)
       formData.append('description', values.description || '')
       formData.append('file', values.file.file.originFileObj || values.file.file)
@@ -146,15 +138,6 @@ export function ComposedAttackManager() {
           </Text>
         </Space>
         <Space>
-          <Select
-            value={filterType}
-            onChange={setFilterType}
-            style={{ width: 160 }}
-            options={[
-              { value: '', label: '全部类型' },
-              ...Object.entries(subTypeLabel).map(([value, label]) => ({ value, label })),
-            ]}
-          />
           <Button type="primary" icon={<UploadOutlined />} onClick={() => setShowUpload(true)}>
             上传已组合攻击
           </Button>
@@ -188,7 +171,6 @@ export function ComposedAttackManager() {
               >
                 <Space size={[0, 8]} wrap style={{ marginBottom: 12 }}>
                   <Tag color="volcano">已组合攻击</Tag>
-                  <Tag color="blue">{subTypeLabel[item.sub_type] || item.sub_type}</Tag>
                   <Tag>{formatSize(item.file_size)}</Tag>
                 </Space>
 
@@ -230,9 +212,6 @@ export function ComposedAttackManager() {
         width={540}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="sub_type" label="攻击类型" rules={[{ required: true, message: '请选择攻击类型' }]}>
-            <Select options={Object.entries(subTypeLabel).map(([value, label]) => ({ value, label }))} />
-          </Form.Item>
           <Form.Item name="name" label="资源名称" rules={[{ required: true, message: '请输入资源名称' }]}>
             <Input placeholder="如：论文 A 预拼接越狱集" />
           </Form.Item>

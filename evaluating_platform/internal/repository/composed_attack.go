@@ -114,17 +114,7 @@ func (r *ComposedAttackRepository) Delete(ctx context.Context, id, expertID uuid
 }
 
 func (r *ComposedAttackRepository) ListPublished(ctx context.Context, subType string, limit, offset int) ([]model.ComposedAttack, int, error) {
-	conds := []string{}
-	args := []interface{}{}
-
-	if subType != "" {
-		args = append(args, subType)
-		conds = append(conds, fmt.Sprintf("sub_type = $%d", len(args)))
-	}
-	where := ""
-	if len(conds) > 0 {
-		where = "WHERE " + strings.Join(conds, " AND ")
-	}
+	where, args := platformDataPublishedWhereClause("sub_type", subType, 0)
 
 	var total int
 	if err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM composed_attacks "+where, args...).Scan(&total); err != nil {

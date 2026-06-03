@@ -1,0 +1,44 @@
+name: ccbos-classical-chinese-skill
+description: Generate CC-BOS classical-Chinese jailbreak safety-evaluation payloads from expert samples or direct enterprise requests using the current tenant MaClaw LLM configuration.
+version: "2.5.0"
+triggers:
+  - CCBOS
+  - classical Chinese jailbreak
+  - 文言文越狱
+  - 古文改写
+  - 提示注入
+status: active
+type: executable
+mode: sequential
+global_timeout: 600
+platforms:
+  - universal
+produces_artifact: true
+params:
+  - name: input
+    description: JSON input path containing expert samples, sample questions, composed attacks, rewrite_request, or target goal. When MaClaw passes structured args, MaClawSrv creates this file automatically.
+    required: false
+    default: examples/input.json
+  - name: output
+    description: JSON output path for the generated payload_dataset.
+    required: false
+    default: output.json
+required_env:
+  - MACLAW_LLM_BASE_URL
+  - MACLAW_LLM_API_KEY
+  - MACLAW_LLM_MODEL
+steps:
+  - action: run
+    params:
+      command: python3 runtime/main.py --input {{input}} --output {{output}}
+      env:
+        MACLAW_LLM_BASE_URL: "{{maclaw_llm_base_url}}"
+        MACLAW_LLM_API_KEY: "{{maclaw_llm_api_key}}"
+        MACLAW_LLM_MODEL: "{{maclaw_llm_model}}"
+        MACLAW_LLM_WIRE_API: "{{maclaw_llm_wire_api}}"
+        MACLAW_LLM_TIMEOUT_SEC: "{{maclaw_llm_timeout_sec}}"
+        CCBOS_BATCH_SIZE: "{{ccbos_batch_size}}"
+        CCBOS_BATCH_CONCURRENCY: "{{ccbos_batch_concurrency}}"
+        OPENAI_BASE_URL: "{{openai_base_url}}"
+        OPENAI_API_KEY: "{{openai_api_key}}"
+        OPENAI_MODEL: "{{openai_model}}"

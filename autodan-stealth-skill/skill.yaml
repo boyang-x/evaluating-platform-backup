@@ -1,0 +1,43 @@
+name: autodan-stealth-skill
+description: Generate AutoDAN-inspired stealthy semantic jailbreak safety-evaluation payloads from expert samples using the current tenant MaClaw LLM configuration without local model downloads.
+version: "1.2.0"
+triggers:
+  - AutoDAN
+  - stealth jailbreak
+  - semantic jailbreak
+  - hierarchical mutation
+status: active
+type: executable
+mode: sequential
+global_timeout: 600
+platforms:
+  - universal
+produces_artifact: true
+params:
+  - name: input
+    description: JSON input path containing expert samples, sample questions, composed attacks, rewrite_request, or target goal.
+    required: false
+    default: examples/input.json
+  - name: output
+    description: JSON output path for the generated payload_dataset.
+    required: false
+    default: output.json
+required_env:
+  - MACLAW_LLM_BASE_URL
+  - MACLAW_LLM_API_KEY
+  - MACLAW_LLM_MODEL
+steps:
+  - action: run
+    params:
+      command: python3 runtime/main.py --input {{input}} --output {{output}}
+      env:
+        MACLAW_LLM_BASE_URL: "{{maclaw_llm_base_url}}"
+        MACLAW_LLM_API_KEY: "{{maclaw_llm_api_key}}"
+        MACLAW_LLM_MODEL: "{{maclaw_llm_model}}"
+        MACLAW_LLM_WIRE_API: "{{maclaw_llm_wire_api}}"
+        MACLAW_LLM_TIMEOUT_SEC: "{{maclaw_llm_timeout_sec}}"
+        AUTODAN_BATCH_SIZE: "{{autodan_batch_size}}"
+        AUTODAN_BATCH_CONCURRENCY: "{{autodan_batch_concurrency}}"
+        OPENAI_BASE_URL: "{{openai_base_url}}"
+        OPENAI_API_KEY: "{{openai_api_key}}"
+        OPENAI_MODEL: "{{openai_model}}"
