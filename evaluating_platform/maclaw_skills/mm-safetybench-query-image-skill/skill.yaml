@@ -1,0 +1,28 @@
+name: mm-safetybench-query-image-skill
+description: Generate MM-SafetyBench-style query-image jailbreak payloads from project-native processed questions.
+version: "0.1.0"
+triggers:
+  - MM-SafetyBench
+  - query image jailbreak
+  - multimodal safety benchmark
+  - visual safety evaluation
+status: active
+type: executable
+mode: sequential
+global_timeout: 180
+platforms:
+  - universal
+produces_artifact: true
+params:
+  - name: input
+    description: JSON input path. Supports requested_count/test_count/count and selection_strategy.
+    required: false
+    default: examples/input.json
+  - name: output
+    description: JSON output path for the generated payload_dataset.
+    required: false
+    default: output.json
+steps:
+  - action: run
+    params:
+      command: python3 runtime/main.py --input {{input}} --output {{output}}

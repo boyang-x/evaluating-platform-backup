@@ -349,6 +349,9 @@ type EvaluationJobProgress struct {
 	UserMessageID      string                      `json:"user_message_id,omitempty"`
 	AssistantMessageID string                      `json:"assistant_message_id,omitempty"`
 	StatusText         string                      `json:"status_text,omitempty"`
+	PlannedCount       int                         `json:"planned_count,omitempty"`
+	ExecutedCount      int                         `json:"executed_count,omitempty"`
+	CurrentStage       string                      `json:"current_stage,omitempty"`
 	DurationMs         int64                       `json:"duration_ms,omitempty"`
 	StageDurationsJSON string                      `json:"stage_durations_json,omitempty"`
 	UpdatedAt          time.Time                   `json:"updated_at,omitempty"`

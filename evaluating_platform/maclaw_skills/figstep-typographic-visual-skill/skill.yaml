@@ -1,0 +1,29 @@
+name: figstep-typographic-visual-skill
+description: Generate FigStep-style typographic visual jailbreak safety-evaluation payloads from project-native SafeBench-Tiny data.
+version: "0.1.0"
+triggers:
+  - FigStep
+  - typographic visual prompt
+  - visual jailbreak
+  - image jailbreak
+  - multimodal jailbreak
+status: active
+type: executable
+mode: sequential
+global_timeout: 180
+platforms:
+  - universal
+produces_artifact: true
+params:
+  - name: input
+    description: JSON input path. Supports requested_count/test_count/count and selection_strategy.
+    required: false
+    default: examples/input.json
+  - name: output
+    description: JSON output path for the generated payload_dataset.
+    required: false
+    default: output.json
+steps:
+  - action: run
+    params:
+      command: python3 runtime/main.py --input {{input}} --output {{output}}

@@ -16,27 +16,44 @@ const (
 )
 
 type redteamExecutionGrantPayload struct {
-	UserID    string `json:"user_id"`
-	SessionID string `json:"session_id,omitempty"`
-	TestCount int    `json:"test_count,omitempty"`
-	ExpiresAt int64  `json:"expires_at"`
+	UserID                 string   `json:"user_id"`
+	SessionID              string   `json:"session_id,omitempty"`
+	TestCount              int      `json:"test_count,omitempty"`
+	SelectedCapabilityRefs []string `json:"selected_capability_refs,omitempty"`
+	SelectedSkillNames     []string `json:"selected_skill_names,omitempty"`
+	SelectionStrategy      string   `json:"selection_strategy,omitempty"`
+	ExpiresAt              int64    `json:"expires_at"`
+}
+
+type redteamExecutionGrantContext struct {
+	TestCount              int
+	SelectedCapabilityRefs []string
+	SelectedSkillNames     []string
+	SelectionStrategy      string
 }
 
 func mintRedteamExecutionGrant(secret, userID, sessionID string, expiresAt time.Time, testCount ...int) string {
+	ctx := redteamExecutionGrantContext{}
+	if len(testCount) > 0 && testCount[0] > 0 {
+		ctx.TestCount = testCount[0]
+	}
+	return mintRedteamExecutionGrantWithContext(secret, userID, sessionID, expiresAt, ctx)
+}
+
+func mintRedteamExecutionGrantWithContext(secret, userID, sessionID string, expiresAt time.Time, ctx redteamExecutionGrantContext) string {
 	secret = strings.TrimSpace(secret)
 	userID = strings.TrimSpace(userID)
 	if secret == "" || userID == "" || expiresAt.IsZero() {
 		return ""
 	}
-	confirmedTestCount := 0
-	if len(testCount) > 0 && testCount[0] > 0 {
-		confirmedTestCount = testCount[0]
-	}
 	payload := redteamExecutionGrantPayload{
-		UserID:    userID,
-		SessionID: strings.TrimSpace(sessionID),
-		TestCount: confirmedTestCount,
-		ExpiresAt: expiresAt.UTC().Unix(),
+		UserID:                 userID,
+		SessionID:              strings.TrimSpace(sessionID),
+		TestCount:              ctx.TestCount,
+		SelectedCapabilityRefs: normalizeGrantStringList(ctx.SelectedCapabilityRefs),
+		SelectedSkillNames:     normalizeGrantStringList(ctx.SelectedSkillNames),
+		SelectionStrategy:      strings.TrimSpace(ctx.SelectionStrategy),
+		ExpiresAt:              expiresAt.UTC().Unix(),
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -97,4 +114,18 @@ func verifyRedteamExecutionGrantPayload(secret, token, userID string, now time.T
 		return redteamExecutionGrantPayload{}, errors.New("execution grant has expired")
 	}
 	return payload, nil
+}
+
+func normalizeGrantStringList(items []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out
 }

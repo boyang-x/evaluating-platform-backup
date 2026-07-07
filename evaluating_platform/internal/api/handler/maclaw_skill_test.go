@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -326,8 +329,20 @@ func TestMaclawSkillHandlerImportUsesHubAsOnlyDistributionPath(t *testing.T) {
 			if got := r.FormValue("email"); got != "expert@example.test" {
 				t.Fatalf("email = %q", got)
 			}
-			if _, _, err := r.FormFile("zip"); err != nil {
+			file, _, err := r.FormFile("zip")
+			if err != nil {
 				t.Fatalf("zip form file missing: %v", err)
+			}
+			archiveBytes, err := io.ReadAll(file)
+			if err != nil {
+				t.Fatalf("read zip form file: %v", err)
+			}
+			if !zipArchiveContains(t, archiveBytes, "runtime/data/cases.json") || !zipArchiveContains(t, archiveBytes, "runtime/data/images/sample.png") {
+				t.Fatalf("submitted zip should duplicate root data assets under runtime/data")
+			}
+			embedded := zipArchiveFileContent(t, archiveBytes, "runtime/embedded_data.py")
+			if !strings.Contains(embedded, `"data/cases.json"`) || !strings.Contains(embedded, `"data/images/sample.png"`) {
+				t.Fatalf("submitted zip should embed root data assets for MaClaw installers that drop subdirectories")
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"submission_id": "sub_1", "status": "pending"})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/skill-submissions/sub_1":
@@ -347,7 +362,8 @@ func TestMaclawSkillHandlerImportUsesHubAsOnlyDistributionPath(t *testing.T) {
 		handler.Import(c)
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/maclaw/skills/import", strings.NewReader(`{"zip_base64":"`+base64.StdEncoding.EncodeToString([]byte("fake zip"))+`","overwrite":true}`))
+	archive := skillArchiveForHubNormalizationTest(t)
+	req := httptest.NewRequest(http.MethodPost, "/maclaw/skills/import", strings.NewReader(`{"zip_base64":"`+base64.StdEncoding.EncodeToString(archive)+`","overwrite":true}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -370,6 +386,71 @@ func TestMaclawSkillHandlerImportUsesHubAsOnlyDistributionPath(t *testing.T) {
 	if store.items[0].Metadata["hub_skill_id"] != "hub-generated-ccbos-id" {
 		t.Fatalf("hub_skill_id metadata = %#v", store.items[0].Metadata)
 	}
+}
+
+func skillArchiveForHubNormalizationTest(t *testing.T) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range map[string]string{
+		"skill.yaml":             "name: data-skill\n",
+		"README.md":              "data skill\n",
+		"runtime/main.py":        "print('ok')\n",
+		"data/cases.json":        `{"cases":[]}`,
+		"data/images/sample.png": "png",
+		"runtime/data/keep.txt":  "existing",
+	} {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("zip create %s: %v", name, err)
+		}
+		if _, err := w.Write([]byte(content)); err != nil {
+			t.Fatalf("zip write %s: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func zipArchiveContains(t *testing.T, data []byte, name string) bool {
+	t.Helper()
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("read submitted zip: %v", err)
+	}
+	for _, file := range zr.File {
+		if file.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func zipArchiveFileContent(t *testing.T, data []byte, name string) string {
+	t.Helper()
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("read submitted zip: %v", err)
+	}
+	for _, file := range zr.File {
+		if file.Name != name {
+			continue
+		}
+		rc, err := file.Open()
+		if err != nil {
+			t.Fatalf("open submitted zip file %s: %v", name, err)
+		}
+		defer rc.Close()
+		content, err := io.ReadAll(rc)
+		if err != nil {
+			t.Fatalf("read submitted zip file %s: %v", name, err)
+		}
+		return string(content)
+	}
+	t.Fatalf("submitted zip missing %s", name)
+	return ""
 }
 
 func TestMaclawSkillHandlerReturnsUnavailableWhenDisabled(t *testing.T) {

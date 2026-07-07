@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -533,6 +534,7 @@ func TestMaclawRuntimeHandlerConfirmsPlanByStartingEvaluationJob(t *testing.T) {
 
 func TestMaclawRuntimeHandlerConfirmsSpecifiedPlanMessageAndOverridesTestCount(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	sampleRef := "sample:" + uuid.NewString()
 	gateway := &fakeMaclawRuntimeGateway{
 		enabled: true,
 		messages: []maclaw.RuntimeMessage{{
@@ -544,7 +546,7 @@ func TestMaclawRuntimeHandlerConfirmsSpecifiedPlanMessageAndOverridesTestCount(t
 			ID:       "msg_selected_plan",
 			Role:     "assistant",
 			Metadata: map[string]string{"response_source": "plan_confirm"},
-			Content:  `{"response_source":"plan_confirm","target_summary":{"target_type":"llm"},"risk_types":["jailbreak"],"test_count":5,"selection_strategy":"random","selected_capability_refs":[{"source_type":"skill","ref":"skillhub:ccbos-classical-chinese-skill"}],"selection_reasons":["classical Chinese jailbreak"],"requires_confirmation":true}`,
+			Content:  `{"response_source":"plan_confirm","target_summary":{"target_type":"llm"},"risk_types":["jailbreak"],"test_count":5,"selection_strategy":"random","selected_capability_refs":[{"source_type":"skill","ref":"skillhub:ccbos-classical-chinese-skill"},{"source_type":"sample","ref":"` + sampleRef + `"}],"selection_reasons":["classical Chinese jailbreak"],"requires_confirmation":true}`,
 		}, {
 			ID:      "msg_after_plan_text",
 			Role:    "assistant",
@@ -552,8 +554,13 @@ func TestMaclawRuntimeHandlerConfirmsSpecifiedPlanMessageAndOverridesTestCount(t
 		}},
 	}
 	handler := NewMaclawRuntimeHandler(gateway, "inst_1")
+	handler.SetExecutionGrantSecret("mcp-secret")
+	userID := uuid.New()
 	router := newEnterpriseRoleRouter()
-	router.POST("/maclaw/evaluation/sessions/:id/confirm", handler.ConfirmPlan)
+	router.POST("/maclaw/evaluation/sessions/:id/confirm", func(c *gin.Context) {
+		c.Set("user_id", userID.String())
+		handler.ConfirmPlan(c)
+	})
 
 	req := httptest.NewRequest(http.MethodPost, "/maclaw/evaluation/sessions/sess_1/confirm", strings.NewReader(`{"plan_message_id":"msg_selected_plan","test_count":3}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -569,6 +576,23 @@ func TestMaclawRuntimeHandlerConfirmsSpecifiedPlanMessageAndOverridesTestCount(t
 	if gateway.lastConfirm.Metadata["test_count"] != "3" || gateway.lastConfirm.Metadata["plan_message_id"] != "msg_selected_plan" || !strings.Contains(gateway.lastConfirm.Metadata["selected_skill_names_json"], "ccbos-classical-chinese-skill") {
 		t.Fatalf("confirm metadata = %#v", gateway.lastConfirm.Metadata)
 	}
+	grant := gateway.lastConfirm.Metadata[redteamExecutionGrantMetadataKey]
+	payload, err := verifyRedteamExecutionGrantPayload("mcp-secret", grant, userID.String(), time.Now())
+	if err != nil {
+		t.Fatalf("verify grant: %v", err)
+	}
+	if payload.TestCount != 3 || !containsString(payload.SelectedCapabilityRefs, sampleRef) || !containsString(payload.SelectedSkillNames, "ccbos-classical-chinese-skill") {
+		t.Fatalf("grant payload = %#v, want selected sample and skill", payload)
+	}
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item), strings.TrimSpace(want)) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestMaclawRuntimeHandlerReturnsUnstructuredPlanTextWithoutRewrite(t *testing.T) {
@@ -728,6 +752,54 @@ func TestMaclawRuntimeHandlerRejectsIncompletePlanConfirm(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "maclaw_plan_confirm_incomplete") || !strings.Contains(w.Body.String(), "risk_types") || !strings.Contains(w.Body.String(), "test_count") {
 		t.Fatalf("body = %s", w.Body.String())
+	}
+}
+
+func TestMaclawRuntimeHandlerConfirmsNestedPlanConfirmPayload(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	gateway := &fakeMaclawRuntimeGateway{
+		enabled: true,
+		messages: []maclaw.RuntimeMessage{{
+			ID:       "msg_plan",
+			Role:     "assistant",
+			Metadata: map[string]string{"response_source": "plan_confirm"},
+			Content: `{
+				"response_source":"plan_confirm",
+				"plan":{
+					"target_summary":"当前被测多模态模型",
+					"risk_types":["jailbreak"],
+					"selected_capability_refs":["skillhub:figstep-typographic-visual-skill"],
+					"selected_skills":["figstep-typographic-visual-skill"],
+					"selection_strategy":"random",
+					"test_count":1,
+					"requires_confirmation":true
+				}
+			}`,
+		}},
+	}
+	handler := NewMaclawRuntimeHandler(gateway, "inst_1")
+	router := newEnterpriseRoleRouter()
+	router.POST("/maclaw/evaluation/sessions/:id/confirm", handler.ConfirmPlan)
+
+	req := httptest.NewRequest(http.MethodPost, "/maclaw/evaluation/sessions/sess_1/confirm", strings.NewReader(`{"plan_message_id":"msg_plan"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d body = %s", w.Code, w.Body.String())
+	}
+	if gateway.confirmCalls != 1 {
+		t.Fatalf("ConfirmRuntimePlan calls = %d, want 1", gateway.confirmCalls)
+	}
+	if got := gateway.lastConfirm.Metadata["test_count"]; got != "1" {
+		t.Fatalf("test_count metadata = %q", got)
+	}
+	if got := gateway.lastConfirm.Metadata["selection_strategy"]; got != "random" {
+		t.Fatalf("selection_strategy metadata = %q", got)
+	}
+	if got := gateway.lastConfirm.Metadata["selected_skill_names_json"]; !strings.Contains(got, "figstep-typographic-visual-skill") {
+		t.Fatalf("selected_skill_names_json = %q", got)
 	}
 }
 

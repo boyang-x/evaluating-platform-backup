@@ -1,6 +1,6 @@
 name: ccbos-classical-chinese-skill
 description: Generate CC-BOS classical-Chinese jailbreak safety-evaluation payloads from expert samples or direct enterprise requests using the current tenant MaClaw LLM configuration.
-version: "2.5.0"
+version: "2.5.2"
 triggers:
   - CCBOS
   - classical Chinese jailbreak

@@ -58,6 +58,46 @@ function healthColor(status?: string) {
   }
 }
 
+function healthLabel(status?: string) {
+  switch ((status || '').toLowerCase()) {
+    case 'healthy':
+      return '健康'
+    case 'unhealthy':
+      return '异常'
+    case 'failed':
+      return '检查失败'
+    case 'error':
+      return '错误'
+    case 'checking':
+      return '检查中'
+    default:
+      return '未检查'
+  }
+}
+
+function isRemoteServer(item: MaclawMCPServerSummary) {
+  return (item.kind || 'remote').toLowerCase() === 'remote'
+}
+
+function runtimeStatus(item: MaclawMCPServerSummary) {
+  if (item.disabled) {
+    return { color: 'default', label: '已禁用' }
+  }
+
+  const health = (item.health_status || '').toLowerCase()
+  if (isRemoteServer(item)) {
+    if (health === 'healthy') return { color: 'green', label: '连接健康' }
+    if (health === 'checking') return { color: 'blue', label: '检查中' }
+    if (health === 'unhealthy' || health === 'failed' || health === 'error') {
+      return { color: 'red', label: '连接异常' }
+    }
+    if (item.auto_start) return { color: 'geekblue', label: '已配置' }
+    return { color: 'default', label: '已配置' }
+  }
+
+  return item.running ? { color: 'blue', label: '运行中' } : { color: 'default', label: '已停止' }
+}
+
 function parseHeaders(value?: string): Record<string, string> | undefined {
   const headers: Record<string, string> = {}
   for (const line of (value || '').split('\n')) {
@@ -98,6 +138,7 @@ export function MaclawMCPServerManager() {
   const [toolsLoading, setToolsLoading] = useState(false)
   const [tools, setTools] = useState<MaclawMCPToolSummary[]>([])
   const [toolsServerName, setToolsServerName] = useState('')
+  const [busyAction, setBusyAction] = useState('')
 
   const activeCount = useMemo(() => items.filter((item) => !item.disabled).length, [items])
 
@@ -159,6 +200,8 @@ export function MaclawMCPServerManager() {
   }
 
   const mutateServer = async (item: MaclawMCPServerSummary, action: 'start' | 'stop' | 'health' | 'delete') => {
+    const actionKey = `${action}:${item.id}`
+    setBusyAction(actionKey)
     try {
       if (action === 'start') await expertService.startMaclawMCPServer(item.id)
       if (action === 'stop') await expertService.stopMaclawMCPServer(item.id)
@@ -167,6 +210,8 @@ export function MaclawMCPServerManager() {
       await loadServers()
     } catch (error) {
       message.error((error as Error).message || '操作 MCP 服务失败')
+    } finally {
+      setBusyAction('')
     }
   }
 
@@ -192,44 +237,81 @@ export function MaclawMCPServerManager() {
       render: (_, item) => (
         <Space direction="vertical" size={2}>
           <Text strong>{item.name}</Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>{item.endpoint_url || 'remote endpoint not set'}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>{item.endpoint_url || '未配置远程地址'}</Text>
         </Space>
       ),
     },
     {
       title: '状态',
-      width: 180,
-      render: (_, item) => (
-        <Space wrap>
-          <Tag color={item.disabled ? 'default' : 'green'}>{item.disabled ? 'disabled' : 'enabled'}</Tag>
-          <Tag color={item.running ? 'blue' : 'default'}>{item.running ? 'running' : 'stopped'}</Tag>
-          <Tag color={healthColor(item.health_status)}>{item.health_status || 'unknown'}</Tag>
-        </Space>
-      ),
+      width: 220,
+      render: (_, item) => {
+        const status = runtimeStatus(item)
+        return (
+          <Space wrap>
+            <Tag color={item.disabled ? 'default' : 'green'}>{item.disabled ? '禁用' : '启用'}</Tag>
+            <Tag color={status.color}>{status.label}</Tag>
+            <Tag color={healthColor(item.health_status)}>{healthLabel(item.health_status)}</Tag>
+          </Space>
+        )
+      },
     },
     {
       title: '认证',
-      width: 170,
+      width: 180,
       render: (_, item) => (
         <Space wrap>
           {item.auth_type ? <Tag>{item.auth_type}</Tag> : null}
-          {item.has_auth_secret ? <Tag color="gold">secret saved</Tag> : null}
+          {item.has_auth_secret ? <Tag color="gold">密钥已保存</Tag> : null}
           {item.header_names?.slice(0, 2).map((name) => <Tag key={name}>{name}</Tag>)}
         </Space>
       ),
     },
     {
       title: '操作',
-      width: 300,
+      width: 330,
       render: (_, item) => (
         <Space wrap>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(item)}>编辑</Button>
-          <Button size="small" icon={<PlayCircleOutlined />} onClick={() => void mutateServer(item, 'start')}>启动</Button>
-          <Button size="small" icon={<StopOutlined />} onClick={() => void mutateServer(item, 'stop')}>停止</Button>
-          <Button size="small" icon={<ReloadOutlined />} onClick={() => void mutateServer(item, 'health')}>检查</Button>
-          <Button size="small" icon={<ToolOutlined />} onClick={() => void showTools(item)}>工具</Button>
-          <Popconfirm title={`确认删除“${item.name}”吗？`} onConfirm={() => void mutateServer(item, 'delete')}>
-            <Button size="small" danger icon={<DeleteOutlined />} />
+          <Button size="small" icon={<EditOutlined />} disabled={Boolean(busyAction)} onClick={() => openEdit(item)}>编辑</Button>
+          <Button
+            size="small"
+            icon={<PlayCircleOutlined />}
+            loading={busyAction === `start:${item.id}`}
+            disabled={Boolean(busyAction) && busyAction !== `start:${item.id}`}
+            onClick={() => void mutateServer(item, 'start')}
+          >
+            启动/重连
+          </Button>
+          {item.running ? (
+            <Popconfirm title={`确认停止 ${item.name} 吗？`} onConfirm={() => void mutateServer(item, 'stop')}>
+              <Button
+                size="small"
+                danger
+                icon={<StopOutlined />}
+                loading={busyAction === `stop:${item.id}`}
+                disabled={Boolean(busyAction) && busyAction !== `stop:${item.id}`}
+              >
+                停止
+              </Button>
+            </Popconfirm>
+          ) : null}
+          <Button
+            size="small"
+            icon={<ReloadOutlined />}
+            loading={busyAction === `health:${item.id}`}
+            disabled={Boolean(busyAction) && busyAction !== `health:${item.id}`}
+            onClick={() => void mutateServer(item, 'health')}
+          >
+            检查
+          </Button>
+          <Button size="small" icon={<ToolOutlined />} disabled={Boolean(busyAction)} onClick={() => void showTools(item)}>工具</Button>
+          <Popconfirm title={`确认删除 ${item.name} 吗？`} onConfirm={() => void mutateServer(item, 'delete')}>
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              loading={busyAction === `delete:${item.id}`}
+              disabled={Boolean(busyAction) && busyAction !== `delete:${item.id}`}
+            />
           </Popconfirm>
         </Space>
       ),
@@ -291,7 +373,7 @@ export function MaclawMCPServerManager() {
           <Form.Item name="headers_text" label="附加请求头">
             <Input.TextArea rows={4} placeholder={'X-Header: value\nX-Trace: demo'} />
           </Form.Item>
-          <Form.Item name="auto_start" label="自动启动" valuePropName="checked">
+          <Form.Item name="auto_start" label="自动启用" valuePropName="checked">
             <Switch />
           </Form.Item>
           <Form.Item name="disabled" label="禁用" valuePropName="checked">

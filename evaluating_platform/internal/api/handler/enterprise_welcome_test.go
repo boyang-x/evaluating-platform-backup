@@ -44,8 +44,17 @@ func TestEnterpriseWelcomeCapabilitiesAreChineseAndSixItems(t *testing.T) {
 		}
 	}
 	for _, item := range body.Items {
-		if strings.Contains(item.Label, "CCBOS") || strings.Contains(item.Description, "shadow resource") || strings.Contains(item.Description, "maclaw") {
+		combined := item.Label + " " + item.Title + " " + item.Description + " " + item.Prompt
+		if strings.Contains(item.Label, "CCBOS") || strings.Contains(item.Description, "shadow resource") || strings.Contains(strings.ToLower(item.Description), "maclaw") {
 			t.Fatalf("welcome capability should be product-facing Chinese text: %#v", item)
+		}
+		for _, forbidden := range []string{"MaClaw", "Skill 检索", "执行计划卡必须", "未安装或未同步", "shadow resource"} {
+			if strings.Contains(combined, forbidden) {
+				t.Fatalf("welcome capability should not expose internal instruction %q: %#v", forbidden, item)
+			}
+		}
+		if !strings.Contains(item.Prompt, "请") || !strings.Contains(item.Prompt, "当前被测模型") {
+			t.Fatalf("welcome prompt should be an actionable Chinese request tied to current target: %#v", item)
 		}
 	}
 }

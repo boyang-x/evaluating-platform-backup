@@ -148,8 +148,10 @@ HubCenter compose expectations:
 - 信息完整后返回 `plan_confirm`，包含目标摘要、风险类型、建议测试轮次、选择策略、选中能力和选择理由。
 - 点击确认时请求携带 `plan_message_id` 和用户最终确认的 `test_count`；BFF 按指定计划卡确认并只准备选中能力。
 - 点击确认后原计划卡保持“已确认”，下面追加进度卡并创建 `evaluation.run`。
-- MaClaw 确认后优先调用 `execute_redteam_evaluation_batch`，由平台按 `MACLAW_REDTEAM_TARGET_CONCURRENCY` 并发执行 payload 组合、target 调用、攻击判定、证据保存和中文报告；LLM 判定使用小批量并发，避免 20 轮以上评测被单个超大判定请求拖慢；旧单步工具只用于兼容/调试。
+- MaClaw 确认后优先调用 `execute_redteam_evaluation_batch`，由平台按 `MACLAW_REDTEAM_TARGET_CONCURRENCY` 并发执行 payload 组合、target 调用、攻击判定、证据保存和中文报告；判定应先解析 `judge_profile`，仅对越狱/文言文等攻击 profile 快速处理实质非拒答成功，提示注入、合规和通用安全 profile 使用各自 rubric，模糊结果再使用小批量并发 LLM 判定，避免 20 轮以上评测被单个超大判定请求拖慢；旧单步工具只用于兼容/调试。
 - Skill-backed confirmed runs call native `manage_skill(action="run")`, register the resulting `payload_dataset` through `register_skill_payload_dataset`, and pass those `payload_handles` into `execute_redteam_evaluation_batch`; missing Skill handles must fail clearly instead of falling back to raw samples.
+- 图文多模态 Skill-backed runs may register `payload_text + images[]` payloads. When the enterprise target metadata has `supports_vision=true`, target calls use OpenAI-compatible text+image message content; when the target is text-only, the run returns safe `target_multimodal_not_supported` failures without sending image payloads. Browser/report/progress outputs must expose only safe image metadata, never raw base64 or image URLs containing secrets.
+- FigStep、MM-SafetyBench、HADES 多模态 Skill 应通过私有 Hub 导入专家门户，并能被企业侧 Skill list/search 发现；小规模自检只验证 Skill 输出与 handle 注册，不对当前被测模型做大规模图文攻击调用。
 - job progress、SSE、完成卡、report、PDF export 可通过 BFF 访问。
 - 响应和 localStorage 不包含 secret、payload、完整目标响应、archive、evidence content 或本地路径。
 

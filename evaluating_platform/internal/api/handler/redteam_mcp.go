@@ -13,8 +13,11 @@ import (
 )
 
 const (
-	redteamVerifiedSessionContextKey   = "redteam_verified_execution_session_id"
-	redteamVerifiedTestCountContextKey = "redteam_verified_execution_test_count"
+	redteamVerifiedSessionContextKey    = "redteam_verified_execution_session_id"
+	redteamVerifiedTestCountContextKey  = "redteam_verified_execution_test_count"
+	redteamVerifiedCapabilityRefsKey    = "redteam_verified_capability_refs"
+	redteamVerifiedSkillNamesKey        = "redteam_verified_skill_names"
+	redteamVerifiedSelectionStrategyKey = "redteam_verified_selection_strategy"
 )
 
 type RedteamMCPHandler struct {
@@ -130,6 +133,14 @@ func (h *RedteamMCPHandler) callTool(c *gin.Context, name string, raw json.RawMe
 		in.ExecutionUserID = redteamMCPPlatformUserID(c)
 		in.ExecutionSessionID = redteamVerifiedExecutionSessionID(c, raw)
 		in.Metadata = metadataWithVerifiedSession(in.Metadata, in.ExecutionSessionID)
+		if in.Limit <= 0 {
+			in.Limit = redteamVerifiedExecutionTestCount(c)
+		}
+		if len(in.SampleRefs) == 0 && len(in.ComposedAttackRefs) == 0 {
+			sampleRefs, composedRefs := selectedRedteamDataRefs(redteamVerifiedSelectedCapabilityRefs(c))
+			in.SampleRefs = sampleRefs
+			in.ComposedAttackRefs = composedRefs
+		}
 		return h.bridge.PrepareSkillInputData(c.Request.Context(), in)
 	case "compose_redteam_payloads":
 		var in maclaw.ComposeRedteamPayloadsInput
@@ -160,6 +171,12 @@ func (h *RedteamMCPHandler) callTool(c *gin.Context, name string, raw json.RawMe
 			in.TestCount = confirmedTestCount
 		}
 		in.Metadata = metadataWithVerifiedSession(in.Metadata, in.ExecutionSessionID)
+		if len(in.SelectedSkills) == 0 {
+			in.SelectedSkills = redteamVerifiedSelectedSkillNames(c)
+		}
+		if strings.TrimSpace(in.SelectionStrategy) == "" {
+			in.SelectionStrategy = redteamVerifiedSelectionStrategy(c)
+		}
 		return h.bridge.ExecuteRedteamEvaluationBatch(c.Request.Context(), redteamMCPPlatformUserID(c), redteamMCPInstanceID(c), in)
 	case "call_evaluation_target":
 		var in maclaw.CallEvaluationTargetInput
@@ -242,6 +259,15 @@ func (h *RedteamMCPHandler) requireExecutionGrant(c *gin.Context, raw json.RawMe
 	if c != nil && payload.TestCount > 0 {
 		c.Set(redteamVerifiedTestCountContextKey, payload.TestCount)
 	}
+	if c != nil && len(payload.SelectedCapabilityRefs) > 0 {
+		c.Set(redteamVerifiedCapabilityRefsKey, append([]string(nil), payload.SelectedCapabilityRefs...))
+	}
+	if c != nil && len(payload.SelectedSkillNames) > 0 {
+		c.Set(redteamVerifiedSkillNamesKey, append([]string(nil), payload.SelectedSkillNames...))
+	}
+	if c != nil && strings.TrimSpace(payload.SelectionStrategy) != "" {
+		c.Set(redteamVerifiedSelectionStrategyKey, strings.TrimSpace(payload.SelectionStrategy))
+	}
 	return nil
 }
 
@@ -275,6 +301,47 @@ func redteamVerifiedExecutionTestCount(c *gin.Context) int {
 	default:
 		return 0
 	}
+}
+
+func redteamVerifiedSelectedCapabilityRefs(c *gin.Context) []string {
+	if c == nil {
+		return nil
+	}
+	value, ok := c.Get(redteamVerifiedCapabilityRefsKey)
+	if !ok {
+		return nil
+	}
+	items, ok := value.([]string)
+	if !ok {
+		return nil
+	}
+	return append([]string(nil), items...)
+}
+
+func redteamVerifiedSelectedSkillNames(c *gin.Context) []string {
+	if c == nil {
+		return nil
+	}
+	value, ok := c.Get(redteamVerifiedSkillNamesKey)
+	if !ok {
+		return nil
+	}
+	items, ok := value.([]string)
+	if !ok {
+		return nil
+	}
+	return append([]string(nil), items...)
+}
+
+func redteamVerifiedSelectionStrategy(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	value, ok := c.Get(redteamVerifiedSelectionStrategyKey)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(stringFromAny(value))
 }
 
 func stringFromAny(value any) string {
@@ -516,6 +583,19 @@ func normalizeMCPRefs(items []string) []string {
 		out = append(out, item)
 	}
 	return out
+}
+
+func selectedRedteamDataRefs(items []string) (sampleRefs []string, composedAttackRefs []string) {
+	for _, item := range normalizeMCPRefs(items) {
+		lower := strings.ToLower(strings.TrimSpace(item))
+		switch {
+		case strings.HasPrefix(lower, "sample:"):
+			sampleRefs = append(sampleRefs, strings.TrimSpace(item))
+		case strings.HasPrefix(lower, "composed_attack:"), strings.HasPrefix(lower, "composed:"):
+			composedAttackRefs = append(composedAttackRefs, strings.TrimSpace(item))
+		}
+	}
+	return sampleRefs, composedAttackRefs
 }
 
 func redteamMCPPlatformUserID(c *gin.Context) uuid.UUID {

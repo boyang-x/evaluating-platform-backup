@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Avatar, Button, InputNumber, Spin, message } from 'antd'
+import { Avatar, Button, InputNumber, Progress, Spin, message } from 'antd'
 import { ApiOutlined, BugOutlined, CheckCircleOutlined, DownloadOutlined, ExportOutlined, LoadingOutlined, PlayCircleOutlined, ReloadOutlined, RobotOutlined, SafetyOutlined, ThunderboltOutlined, UserOutlined } from '@ant-design/icons'
 
 import type { ChatMessage, PlanInfo, WelcomeCapability } from '../../services/chat'
@@ -40,6 +40,92 @@ const SELECTION_STRATEGY_LABELS: Record<string, string> = {
   sequential: '顺序抽取',
   risk_coverage: '按风险覆盖',
   maclaw_selected: 'MaClaw 自主选择',
+}
+
+const PROGRESS_STAGE_LABELS: Record<string, string> = {
+  queued: '排队中',
+  pending: '排队中',
+  starting: '启动评估',
+  prepare_skill_input: '准备专家样本',
+  run_skill: '运行 Skill 生成载荷',
+  register_skill_payloads: '登记 Skill 载荷',
+  executing: '执行评估',
+  running: '执行评估',
+  execute_batch: '批量执行评估',
+  compose_payloads: '组合评估载荷',
+  composing_payloads: '组合评估载荷',
+  target_call: '调用被测模型',
+  target_calls: '调用被测模型',
+  calling_target: '调用被测模型',
+  judgement: '判定攻击结果',
+  judging: '判定攻击结果',
+  save_evidence: '保存证据摘要',
+  reporting: '生成报告中',
+  compile_report: '生成报告中',
+  completed: '评估完成',
+  executed: '测试已完成',
+  failed: '评估失败',
+  canceled: '已取消',
+  cancelled: '已取消',
+}
+
+function normalizeProgressStage(phase?: string, currentStage?: string) {
+  return String(currentStage || phase || '').trim().toLowerCase()
+}
+
+function progressStageLabel(phase?: string, currentStage?: string) {
+  const key = normalizeProgressStage(phase, currentStage)
+  return PROGRESS_STAGE_LABELS[key] || '执行评估'
+}
+
+function stageFallbackPercent(phase?: string, currentStage?: string) {
+  switch (normalizeProgressStage(phase, currentStage)) {
+    case 'queued':
+    case 'pending':
+      return 4
+    case 'starting':
+      return 8
+    case 'prepare_skill_input':
+      return 16
+    case 'run_skill':
+      return 28
+    case 'register_skill_payloads':
+      return 36
+    case 'compose_payloads':
+    case 'composing_payloads':
+      return 18
+    case 'execute_batch':
+      return 42
+    case 'target_call':
+    case 'target_calls':
+    case 'calling_target':
+    case 'executing':
+    case 'running':
+      return 45
+    case 'judgement':
+    case 'judging':
+      return 72
+    case 'save_evidence':
+      return 82
+    case 'reporting':
+    case 'compile_report':
+      return 92
+    case 'completed':
+    case 'executed':
+      return 100
+    default:
+      return 15
+  }
+}
+
+function progressPercent(phase?: string, currentStage?: string, executedCount?: number, plannedCount?: number) {
+  if (phase === 'failed' || phase === 'canceled' || phase === 'cancelled') return 100
+  if (phase === 'reporting' || phase === 'completed' || phase === 'executed') return Math.max(stageFallbackPercent(phase, currentStage), 100)
+  if (typeof plannedCount === 'number' && plannedCount > 0 && typeof executedCount === 'number') {
+    const bounded = Math.max(0, Math.min(plannedCount, executedCount))
+    return Math.max(stageFallbackPercent(phase, currentStage), Math.round((bounded / plannedCount) * 100))
+  }
+  return stageFallbackPercent(phase, currentStage)
 }
 
 function capabilityVisual(item: WelcomeCapability) {
@@ -177,6 +263,7 @@ function ReportCard({
   isRunning,
   statusText,
   phase,
+  currentStage,
   executedCount,
   plannedCount,
   successCount,
@@ -206,6 +293,7 @@ function ReportCard({
   isRunning?: boolean
   statusText?: string
   phase?: string
+  currentStage?: string
   executedCount?: number
   plannedCount?: number
   successCount?: number
@@ -313,6 +401,12 @@ function ReportCard({
               : '正在执行测试'
     const showSpinner = isRunning && phase !== 'executed' && !isFailed
     const borderColor = isFailed ? 'rgba(255,77,79,0.35)' : 'rgba(105,219,124,0.3)'
+    const stageLabel = progressStageLabel(phase, currentStage)
+    const percent = progressPercent(phase, currentStage, executedCount, plannedCount)
+    const progressStatus = isFailed ? 'exception' : percent >= 100 ? 'success' : 'active'
+    const countLabel = typeof plannedCount === 'number' && plannedCount > 0
+      ? `执行轮次 ${typeof executedCount === 'number' ? Math.max(0, Math.min(plannedCount, executedCount)) : 0}/${plannedCount}`
+      : stageLabel
     return (
       <div style={{ background: 'var(--bg-card)', border: `1px solid ${borderColor}`, borderRadius: 12, padding: '14px 18px', maxWidth: 420, marginTop: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
@@ -322,14 +416,16 @@ function ReportCard({
             <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{statusText || '评估任务执行中，请稍候...'}</div>
           </div>
         </div>
-        {typeof plannedCount === 'number' && plannedCount > 0 && (
+        <div style={{ display: 'grid', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, color: 'var(--text-muted)', fontSize: 12 }}>
+            <span style={{ color: '#4d96ff', fontWeight: 500 }}>{countLabel}</span>
+            <span>{stageLabel}</span>
+          </div>
+          <Progress percent={percent} size="small" status={progressStatus} showInfo={false} strokeColor={isFailed ? '#ff4d4f' : '#4d96ff'} trailColor="rgba(255,255,255,0.08)" />
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-muted)', fontSize: 12 }}>
-            <span style={{ background: 'rgba(26,109,255,0.12)', color: '#4d96ff', padding: '2px 8px', borderRadius: 4 }}>
-              已执行 {typeof executedCount === 'number' ? executedCount : 0}/{plannedCount} 条
-            </span>
             {phase === 'reporting' && <span>测试已完成，报告生成后会自动提供下载卡片。</span>}
           </div>
-        )}
+        </div>
         {isFailed && (canResumeJob || canRetry || needsReview || retryStarted || resumeStarted) && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
             {(canResumeJob || resumeStarted) && (
@@ -557,6 +653,7 @@ export function MessageBubble({
             downloadable={msg.metadata?.downloadable as boolean | undefined}
             statusText={msg.metadata?.status_text as string | undefined}
             phase={msg.metadata?.phase as string | undefined}
+            currentStage={msg.metadata?.current_stage as string | undefined}
             executedCount={msg.metadata?.executed_count as number | undefined}
             plannedCount={msg.metadata?.planned_count as number | undefined}
             successCount={msg.metadata?.success_count as number | undefined}

@@ -75,6 +75,9 @@ export interface EvaluationJob {
     instance_id?: string
     session_id?: string
     status_text?: string
+    planned_count?: number
+    executed_count?: number
+    current_stage?: string
     duration_ms?: number
     stage_durations_json?: string
     updated_at?: string
@@ -97,6 +100,7 @@ export interface EvaluationTarget {
   status?: string
   health_status?: string
   credential_secret_set?: boolean
+  metadata?: Record<string, string>
 }
 
 export interface EvaluationTargetInput {
@@ -153,6 +157,11 @@ interface EvaluationRunEvent {
   status?: string
   occurred_at?: string
   message?: string
+  phase?: string
+  status_text?: string
+  planned_count?: number
+  executed_count?: number
+  current_stage?: string
   plan_confirm?: {
     message_id?: string
     output_type?: string
@@ -323,6 +332,7 @@ function toChatMessage(message: RuntimeMessage): ChatMessage {
     metadata.risk_level = message.metadata?.risk_level
     metadata.safety_score = optionalNumber(message.metadata?.safety_score)
     metadata.executed_count = optionalNumber(message.metadata?.executed_count || message.metadata?.total_cases)
+    metadata.planned_count = optionalNumber(message.metadata?.planned_count || message.metadata?.total_cases)
     metadata.success_count = optionalNumber(message.metadata?.success_count)
     metadata.failure_count = optionalNumber(message.metadata?.failure_count)
     metadata.download_format = 'pdf'
@@ -416,6 +426,7 @@ function toEventChatMessage(envelope: RuntimeStreamEnvelope): ChatMessage | null
         risk_level: event.report?.risk_level,
         safety_score: event.report?.safety_score,
         executed_count: event.report?.executed_count,
+        planned_count: event.planned_count,
         success_count: event.report?.success_count,
         failure_count: event.report?.failure_count,
         download_format: 'pdf',
@@ -460,8 +471,11 @@ function toEventChatMessage(envelope: RuntimeStreamEnvelope): ChatMessage | null
     metadata: {
       card_type: 'progress',
       assessment_id: runID,
-      phase: eventProgressPhase(event),
-      status_text: event.error || event.message || envelope.snapshot?.run?.error || '评测任务执行中，请稍候。',
+      phase: event.phase || envelope.snapshot?.run?.metadata?.phase || eventProgressPhase(event),
+      status_text: event.status_text || event.error || event.message || envelope.snapshot?.run?.metadata?.status_text || envelope.snapshot?.run?.error || '评测任务执行中，请稍候。',
+      planned_count: optionalNumber(event.planned_count ?? envelope.snapshot?.run?.metadata?.planned_count ?? envelope.snapshot?.run?.metadata?.total_count ?? envelope.snapshot?.run?.metadata?.test_count),
+      executed_count: optionalNumber(event.executed_count ?? envelope.snapshot?.run?.metadata?.executed_count ?? envelope.snapshot?.run?.metadata?.completed_count),
+      current_stage: event.current_stage || envelope.snapshot?.run?.metadata?.current_stage || envelope.snapshot?.run?.metadata?.progress_phase,
     },
     created_at: createdAt,
   }
@@ -534,7 +548,7 @@ export const maclawRuntimeChatService = {
     )
     return {
       message: {
-        id: `maclaw-job:${job.id || Date.now()}`,
+        id: job.id ? `job-${job.id}-queued` : `maclaw-job:${Date.now()}`,
         session_id: sessionId,
         role: 'assistant',
         content: '',
@@ -544,6 +558,9 @@ export const maclawRuntimeChatService = {
           assessment_id: job.progress?.run_id || job.result?.run?.id,
           phase,
           status_text: statusText,
+          planned_count: job.progress?.planned_count || testCount,
+          executed_count: job.progress?.executed_count,
+          current_stage: job.progress?.current_stage,
           duration_ms: job.progress?.duration_ms,
           stage_durations_json: job.progress?.stage_durations_json,
         },

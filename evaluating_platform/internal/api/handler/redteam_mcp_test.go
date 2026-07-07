@@ -141,6 +141,31 @@ func TestRedteamMCPHandlerRegistersSkillPayloadDatasetWithGrant(t *testing.T) {
 	}
 }
 
+func TestRedteamMCPHandlerPreparesSkillInputFromGrantSelectedRefs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	bridge := maclaw.NewRedteamToolBridge(nil, nil, nil)
+	bridge.SetPayloadProvider(handlerBatchPayloadProvider{})
+	handler := NewRedteamMCPHandler(bridge, "mcp-secret")
+	userID := uuid.NewString()
+	sampleRef := "sample:" + uuid.NewString()
+	grant := mintRedteamExecutionGrantWithContext("mcp-secret", userID, "sess_skill", time.Now().Add(time.Hour), redteamExecutionGrantContext{
+		TestCount:              7,
+		SelectedCapabilityRefs: []string{"skillhub:ccbos-classical-chinese-skill", sampleRef},
+		SelectedSkillNames:     []string{"ccbos-classical-chinese-skill"},
+	})
+
+	body := performRedteamMCPRequestWithHeaders(t, handler, `{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"prepare_skill_input_data","arguments":{"run_id":"run_skill","session_id":"sess_skill","metadata":{"evaluation_execution_grant":"`+grant+`"}}}}`, map[string]string{
+		"X-Evaluating-Platform-User-ID": userID,
+		"X-Evaluating-Platform-Role":    "enterprise",
+	})
+	if !strings.Contains(body, `\"count\":7`) || !strings.Contains(body, sampleRef+"#1") {
+		t.Fatalf("prepare skill input response = %s", body)
+	}
+	if strings.Contains(body, grant) || strings.Contains(body, "ccbos-classical-chinese-skill") {
+		t.Fatalf("prepare skill input response leaked grant context: %s", body)
+	}
+}
+
 func TestRedteamMCPHandlerExecutesBatchToolWithGrant(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	targetServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

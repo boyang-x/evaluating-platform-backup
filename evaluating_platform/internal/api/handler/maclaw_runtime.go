@@ -374,10 +374,6 @@ func (h *MaclawRuntimeHandler) ConfirmPlan(c *gin.Context) {
 	if effectiveTestCount > 0 {
 		metadata["test_count"] = strconv.Itoa(effectiveTestCount)
 	}
-	if grant := mintRedteamExecutionGrant(h.executionGrantKey, c.GetString("user_id"), sessionID, time.Now().Add(redteamExecutionGrantTTL), effectiveTestCount); grant != "" {
-		metadata[redteamExecutionGrantMetadataKey] = grant
-		metadata["evaluation_execution_grant_expires_at"] = strconv.FormatInt(time.Now().Add(redteamExecutionGrantTTL).Unix(), 10)
-	}
 	if len(selectedSkills) > 0 {
 		if data, err := json.Marshal(selectedSkills); err == nil {
 			metadata["selected_skill_names_json"] = string(data)
@@ -388,10 +384,20 @@ func (h *MaclawRuntimeHandler) ConfirmPlan(c *gin.Context) {
 			metadata["selected_capability_refs_json"] = string(data)
 		}
 	}
-	if body, ok := runtimePlanJSON(planMessage.Content); ok {
+	if body, ok := runtimePlanPayloadJSON(planMessage.Content); ok {
 		if strategy := strings.TrimSpace(fmtAnyString(body["selection_strategy"])); strategy != "" {
 			metadata["selection_strategy"] = strategy
 		}
+	}
+	grantExpiresAt := time.Now().Add(redteamExecutionGrantTTL)
+	if grant := mintRedteamExecutionGrantWithContext(h.executionGrantKey, c.GetString("user_id"), sessionID, grantExpiresAt, redteamExecutionGrantContext{
+		TestCount:              effectiveTestCount,
+		SelectedCapabilityRefs: resources,
+		SelectedSkillNames:     selectedSkills,
+		SelectionStrategy:      metadata["selection_strategy"],
+	}); grant != "" {
+		metadata[redteamExecutionGrantMetadataKey] = grant
+		metadata["evaluation_execution_grant_expires_at"] = strconv.FormatInt(grantExpiresAt.Unix(), 10)
 	}
 	confirmCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 10*time.Minute)
 	defer cancel()
@@ -675,7 +681,7 @@ func isRuntimeReportMessage(msg maclaw.RuntimeMessage) bool {
 }
 
 func selectedCapabilityRefsFromContent(content string) (resources []string, skills []string) {
-	body, ok := runtimePlanJSON(content)
+	body, ok := runtimePlanPayloadJSON(content)
 	if !ok {
 		return nil, nil
 	}
@@ -770,13 +776,16 @@ func selectedCapabilityRefsFromContent(content string) (resources []string, skil
 }
 
 func planConfirmExecutionRequirements(content string, overrideTestCount int, targetConfigured bool) (int, []string) {
-	body, ok := runtimePlanJSON(content)
+	body, ok := runtimePlanPayloadJSON(content)
 	if !ok {
 		return 0, []string{"plan_confirm"}
 	}
 	effectiveTestCount := overrideTestCount
 	if effectiveTestCount <= 0 {
-		effectiveTestCount = intFromAny(firstAny(body["test_count"], body["testCount"]))
+		effectiveTestCount = intFromAny(body["test_count"])
+		if effectiveTestCount <= 0 {
+			effectiveTestCount = intFromAny(body["testCount"])
+		}
 	}
 	missing := []string{}
 	if !targetConfigured && !planHasTargetSummary(body) {
@@ -798,6 +807,9 @@ func planHasTargetSummary(body map[string]any) bool {
 		}
 	}
 	for _, key := range []string{"target_summary", "targetSummary"} {
+		if strings.TrimSpace(fmtAnyString(body[key])) != "" {
+			return true
+		}
 		if summary, ok := body[key].(map[string]any); ok {
 			for _, value := range summary {
 				if strings.TrimSpace(fmtAnyString(value)) != "" {
@@ -921,6 +933,15 @@ func appendRuntimeJobProgressMessages(messages []maclaw.RuntimeMessage, sessionI
 			}
 			if strings.TrimSpace(progress.StageDurationsJSON) != "" {
 				metadata["stage_durations_json"] = progress.StageDurationsJSON
+			}
+			if progress.PlannedCount > 0 {
+				metadata["planned_count"] = strconv.Itoa(progress.PlannedCount)
+			}
+			if progress.ExecutedCount >= 0 && progress.PlannedCount > 0 {
+				metadata["executed_count"] = strconv.Itoa(progress.ExecutedCount)
+			}
+			if strings.TrimSpace(progress.CurrentStage) != "" {
+				metadata["current_stage"] = progress.CurrentStage
 			}
 		}
 		messages = append(messages, maclaw.RuntimeMessage{
@@ -1236,6 +1257,29 @@ func runtimePlanJSON(content string) (map[string]any, bool) {
 		}
 	}
 	return nil, false
+}
+
+func runtimePlanPayloadJSON(content string) (map[string]any, bool) {
+	body, ok := runtimePlanJSON(content)
+	if !ok {
+		return nil, false
+	}
+	plan, ok := body["plan"].(map[string]any)
+	if !ok {
+		return body, true
+	}
+	out := make(map[string]any, len(plan)+2)
+	for key, value := range plan {
+		out[key] = value
+	}
+	for _, key := range []string{"response_source", "evaluation_event_type"} {
+		if _, exists := out[key]; !exists {
+			if value := body[key]; value != nil {
+				out[key] = value
+			}
+		}
+	}
+	return out, true
 }
 
 func runtimeJSONCandidates(content string) []string {

@@ -48,6 +48,13 @@ func (h *AttackSampleHandler) Upload(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "sub_type and name are required"})
 		return
 	}
+	if h.manager == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"code":  "sample_storage_unavailable",
+			"error": "sample storage is unavailable, please retry after the storage service is ready",
+		})
+		return
+	}
 
 	file, _, err := c.Request.FormFile("file")
 	if err != nil {
@@ -116,7 +123,7 @@ func (h *AttackSampleHandler) Delete(c *gin.Context) {
 	}
 
 	// 删除 MinIO 文件
-	if encPath != "" {
+	if encPath != "" && h.store != nil {
 		_ = h.store.Delete(c.Request.Context(), encPath)
 	}
 
@@ -135,6 +142,13 @@ func (h *AttackSampleHandler) Preview(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	if limit <= 0 {
 		limit = 20
+	}
+	if h.loader == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"code":  "sample_storage_unavailable",
+			"error": "sample storage is unavailable, please retry after the storage service is ready",
+		})
+		return
 	}
 
 	payloads, err := h.loader.Preview(c.Request.Context(), id, limit)

@@ -2,14 +2,23 @@ package maclaw
 
 import (
 	"bytes"
+	"compress/zlib"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf16"
 
@@ -64,12 +73,19 @@ type RedteamArtifactStore interface {
 }
 
 type RedteamArtifactService struct {
-	store      RedteamArtifactStore
-	now        func() time.Time
-	handleSalt string
+	store        RedteamArtifactStore
+	now          func() time.Time
+	handleSalt   string
+	mu           sync.Mutex
+	reportImages map[string]redteamReportImageAttachment
 }
 
 const maxRedteamArtifactTextRunes = 2000
+
+type redteamReportImageAttachment struct {
+	ByFindingID map[string][]RedteamPayloadImage
+	ExpiresAt   time.Time
+}
 
 var redteamArtifactSecretPattern = regexp.MustCompile(`(?i)(secret[-_a-z0-9]*|sk-[a-z0-9][a-z0-9_\-]{5,}|bearer\s+[a-z0-9._\-]+|api[_ -]?key\s*[:=]\s*\S+)`)
 
@@ -186,6 +202,7 @@ func (s *RedteamArtifactService) CompileReport(ctx context.Context, userID uuid.
 	if err != nil {
 		return nil, err
 	}
+	s.rememberReportImages(saved.ID, in.ReportImages)
 	report := reportFromRecord(saved)
 	return &report, nil
 }
@@ -222,10 +239,6 @@ func sanitizeRedteamArtifactText(value string) string {
 		"prompt body",
 		"raw response",
 		"target response body",
-		"credential",
-		"api key",
-		"secret",
-		"token",
 		"local path",
 		"evidence content",
 	} {
@@ -267,7 +280,8 @@ func (s *RedteamArtifactService) ExportReport(ctx context.Context, userID uuid.U
 	}
 	switch format {
 	case "pdf":
-		content := renderReportPDF(report)
+		pdfReport := s.reportWithPDFImages(report)
+		content := renderReportPDF(pdfReport)
 		return &EvaluationReportExport{
 			ReportID:    report.ID,
 			Format:      "pdf",
@@ -295,6 +309,83 @@ func (s *RedteamArtifactService) ExportReport(ctx context.Context, userID uuid.U
 		}, nil
 	default:
 		return nil, errors.New("unsupported report export format")
+	}
+}
+
+func (s *RedteamArtifactService) rememberReportImages(reportID string, images map[string][]RedteamPayloadImage) {
+	reportID = strings.TrimSpace(reportID)
+	if s == nil || reportID == "" || len(images) == 0 {
+		return
+	}
+	byFinding := map[string][]RedteamPayloadImage{}
+	for findingID, items := range images {
+		findingID = strings.TrimSpace(findingID)
+		if findingID == "" {
+			continue
+		}
+		cloned := cloneRedteamPayloadImages(items)
+		if len(cloned) == 0 {
+			continue
+		}
+		byFinding[findingID] = cloned
+	}
+	if len(byFinding) == 0 {
+		return
+	}
+	now := s.nowUTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.reportImages == nil {
+		s.reportImages = map[string]redteamReportImageAttachment{}
+	}
+	s.cleanupReportImagesLocked(now)
+	s.reportImages[reportID] = redteamReportImageAttachment{
+		ByFindingID: byFinding,
+		ExpiresAt:   now.Add(redteamPayloadHandleTTL),
+	}
+}
+
+func (s *RedteamArtifactService) reportWithPDFImages(report *EvaluationReport) *EvaluationReport {
+	if s == nil || report == nil || strings.TrimSpace(report.ID) == "" {
+		return report
+	}
+	now := s.nowUTC()
+	s.mu.Lock()
+	attachment, ok := s.reportImages[strings.TrimSpace(report.ID)]
+	if ok && !attachment.ExpiresAt.IsZero() && !now.Before(attachment.ExpiresAt) {
+		delete(s.reportImages, strings.TrimSpace(report.ID))
+		ok = false
+	}
+	s.mu.Unlock()
+	if !ok || len(attachment.ByFindingID) == 0 {
+		return report
+	}
+	copied := *report
+	copied.Findings = append([]EvaluationReportFinding(nil), report.Findings...)
+	for idx := range copied.Findings {
+		findingID := strings.TrimSpace(copied.Findings[idx].ID)
+		images := attachment.ByFindingID[findingID]
+		if len(images) == 0 {
+			continue
+		}
+		metadata := cloneMetadata(copied.Findings[idx].Metadata)
+		if metadata == nil {
+			metadata = map[string]string{}
+		}
+		mergeStringMetadata(metadata, reportImageMetadataForPayload(images))
+		copied.Findings[idx].Metadata = metadata
+	}
+	return &copied
+}
+
+func (s *RedteamArtifactService) cleanupReportImagesLocked(now time.Time) {
+	if s == nil || len(s.reportImages) == 0 {
+		return
+	}
+	for reportID, attachment := range s.reportImages {
+		if !attachment.ExpiresAt.IsZero() && !now.Before(attachment.ExpiresAt) {
+			delete(s.reportImages, reportID)
+		}
 	}
 }
 
@@ -548,11 +639,17 @@ func findingLines(findings []EvaluationReportFinding) []string {
 		if title := strings.TrimSpace(finding.Title); title != "" {
 			lines = append(lines, "   - 测试问题："+title)
 		}
+		if original := findingOriginalQuestionSummary(finding); original != "" {
+			lines = append(lines, "   - 原样本问题："+original)
+		}
 		if strings.TrimSpace(finding.Severity) != "" {
 			lines = append(lines, "   - 严重程度："+strings.TrimSpace(finding.Severity))
 		}
 		if strings.TrimSpace(finding.Category) != "" {
 			lines = append(lines, "   - 类型："+strings.TrimSpace(finding.Category))
+		}
+		if context := findingCapabilityContextSummary(finding); context != "" {
+			lines = append(lines, "   - "+context)
 		}
 		if strings.TrimSpace(finding.Description) != "" {
 			lines = append(lines, "   - 模型回答："+strings.TrimSpace(finding.Description))
@@ -566,13 +663,23 @@ func findingLines(findings []EvaluationReportFinding) []string {
 
 func successfulAttackExampleLines(findings []EvaluationReportFinding) []string {
 	lines := []string{}
+	shown := 0
+	total := 0
 	for _, finding := range findings {
 		if !findingLooksSuccessful(finding) {
 			continue
 		}
+		total++
+		if shown >= maxSuccessfulAttackExamples() {
+			continue
+		}
+		shown++
 		lines = append(lines, "- 严重程度："+firstNonEmptyString(finding.Severity, "high"))
 		if title := strings.TrimSpace(finding.Title); title != "" {
 			lines = append(lines, "  - 样本问题："+title)
+		}
+		if original := findingOriginalQuestionSummary(finding); original != "" {
+			lines = append(lines, "  - 原样本问题："+original)
 		}
 		if description := strings.TrimSpace(finding.Description); description != "" {
 			lines = append(lines, "  - 模型响应摘要："+description)
@@ -586,7 +693,76 @@ func successfulAttackExampleLines(findings []EvaluationReportFinding) []string {
 	if len(lines) == 0 {
 		return []string{"未发现攻击成功样例。"}
 	}
+	if total > shown {
+		lines = append(lines, fmt.Sprintf("- 其余 %d 条攻击成功样例已省略，可在评估发现部分查看完整条目。", total-shown))
+	}
 	return lines
+}
+
+func maxSuccessfulAttackExamples() int {
+	return 3
+}
+
+func findingOriginalQuestionSummary(finding EvaluationReportFinding) string {
+	for _, key := range []string{"original_question_summary", "original_sample_question", "source_question", "question_summary"} {
+		if value := strings.TrimSpace(finding.Metadata[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func findingCapabilityContextSummary(finding EvaluationReportFinding) string {
+	metadata := finding.Metadata
+	if len(metadata) == 0 {
+		return ""
+	}
+	parts := []string{}
+	if skillName := strings.TrimSpace(metadata["skill_name"]); skillName != "" {
+		parts = append(parts, "使用能力："+skillName)
+	}
+	if modality := displayPayloadModality(metadata["payload_modality"]); modality != "" {
+		piece := "载荷形态：" + modality
+		if imageCount := strings.TrimSpace(metadata["image_count"]); imageCount != "" {
+			piece += "；图片数量：" + imageCount
+		}
+		if imageTypes := strings.TrimSpace(metadata["image_mime_types"]); imageTypes != "" {
+			piece += "；图片类型：" + imageTypes
+		}
+		parts = append(parts, piece)
+	}
+	if family := displayMultimodalAttackFamily(metadata["multimodal_attack_family"]); family != "" {
+		parts = append(parts, "多模态方法："+family)
+	}
+	return strings.Join(parts, "；")
+}
+
+func displayPayloadModality(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return ""
+	case "text_image", "image_text", "multimodal", "vision":
+		return "图文"
+	case "text":
+		return "文本"
+	default:
+		return strings.TrimSpace(value)
+	}
+}
+
+func displayMultimodalAttackFamily(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "":
+		return ""
+	case "figstep":
+		return "FigStep"
+	case "mm_safetybench", "mm-safetybench":
+		return "MM-SafetyBench"
+	case "hades":
+		return "HADES"
+	default:
+		return strings.TrimSpace(value)
+	}
 }
 
 func findingLooksSuccessful(finding EvaluationReportFinding) bool {
@@ -671,7 +847,7 @@ func displayRiskLevel(value string) string {
 }
 
 func renderReportPDF(report *EvaluationReport) []byte {
-	pages := []string{pdfCoverPageContent(report)}
+	pages := []pdfRenderedPage{pdfCoverPageContent(report)}
 	pages = append(pages, pdfBodyPageContents(report)...)
 	objects := []string{
 		"<< /Type /Catalog /Pages 2 0 R >>",
@@ -688,12 +864,28 @@ func renderReportPDF(report *EvaluationReport) []byte {
 	}
 	for _, page := range pages {
 		contentObjectIDs = append(contentObjectIDs, len(objects)+1)
-		objects = append(objects, fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len([]byte(page)), page))
+		objects = append(objects, fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len([]byte(page.Content)), page.Content))
+	}
+	imageObjectIDs := make([][]int, len(pages))
+	for pageIndex, page := range pages {
+		for _, image := range page.Images {
+			imageObjectIDs[pageIndex] = append(imageObjectIDs[pageIndex], len(objects)+1)
+			objects = append(objects, pdfImageObject(image))
+		}
 	}
 	kids := make([]string, 0, len(pageObjectIDs))
 	for i, pageObjectID := range pageObjectIDs {
 		kids = append(kids, fmt.Sprintf("%d 0 R", pageObjectID))
-		objects[pageObjectID-1] = fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 5 0 R >> >> /Contents %d 0 R >>", contentObjectIDs[i])
+		xobjects := ""
+		if len(imageObjectIDs[i]) > 0 {
+			parts := make([]string, 0, len(imageObjectIDs[i]))
+			for imageIndex, objectID := range imageObjectIDs[i] {
+				name := firstNonEmptyString(pages[i].Images[imageIndex].Name, "Im"+intString(imageIndex+1))
+				parts = append(parts, "/"+name+" "+intString(objectID)+" 0 R")
+			}
+			xobjects = " /XObject << " + strings.Join(parts, " ") + " >>"
+		}
+		objects[pageObjectID-1] = fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 5 0 R >>%s >> /Contents %d 0 R >>", xobjects, contentObjectIDs[i])
 	}
 	objects[1] = fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", strings.Join(kids, " "), len(pageObjectIDs))
 	return writePDFObjects(objects)
@@ -718,11 +910,25 @@ func wrapPDFLine(line string, maxRunes int) []string {
 }
 
 type pdfPageWriter struct {
-	buf bytes.Buffer
-	y   float64
+	buf    bytes.Buffer
+	y      float64
+	images []pdfReportImage
 }
 
-func pdfCoverPageContent(report *EvaluationReport) string {
+type pdfRenderedPage struct {
+	Content string
+	Images  []pdfReportImage
+}
+
+type pdfReportImage struct {
+	Name        string
+	Width       int
+	Height      int
+	Stream      []byte
+	Description string
+}
+
+func pdfCoverPageContent(report *EvaluationReport) pdfRenderedPage {
 	var page pdfPageWriter
 	page.y = 545
 	title := firstNonEmptyString(report.Title, "大模型安全评估报告")
@@ -749,15 +955,15 @@ func pdfCoverPageContent(report *EvaluationReport) string {
 		score = fmt.Sprintf("%.0f/100", *report.SafetyScore)
 	}
 	page.centerText("风险等级："+displayRiskLevel(firstNonEmptyString(report.RiskLevel, "未评定"))+"  |  安全评分："+score, 14, 0.92, 0.30, 0.12)
-	return page.buf.String()
+	return page.rendered()
 }
 
-func pdfBodyPageContents(report *EvaluationReport) []string {
-	pages := []string{}
+func pdfBodyPageContents(report *EvaluationReport) []pdfRenderedPage {
+	pages := []pdfRenderedPage{}
 	page := newPDFBodyPage()
 	appendPage := func() *pdfPageWriter {
 		page.footer()
-		pages = append(pages, page.buf.String())
+		pages = append(pages, page.rendered())
 		page = newPDFBodyPage()
 		return page
 	}
@@ -797,7 +1003,7 @@ func pdfBodyPageContents(report *EvaluationReport) []string {
 	}
 	if page.y < 770 {
 		page.footer()
-		pages = append(pages, page.buf.String())
+		pages = append(pages, page.rendered())
 	}
 	if len(pages) == 0 {
 		fallback := newPDFBodyPage()
@@ -805,7 +1011,7 @@ func pdfBodyPageContents(report *EvaluationReport) []string {
 		fallback.y -= 26
 		fallback.text(70, fallback.y, "暂无报告内容。", 10.5, 0.16, 0.16, 0.16)
 		fallback.footer()
-		pages = append(pages, fallback.buf.String())
+		pages = append(pages, fallback.rendered())
 	}
 	return pages
 }
@@ -860,9 +1066,6 @@ func (p *pdfPageWriter) sectionHeading(title string) {
 }
 
 func (p *pdfPageWriter) findingCard(index int, finding EvaluationReportFinding, appendPage func() *pdfPageWriter) *pdfPageWriter {
-	cardTop := p.y + 12
-	p.rect(70, cardTop-36, 455, 36, 0.94, 0.97, 1.00, true)
-	p.rect(70, cardTop-36, 455, 36, 0.82, 0.88, 0.96, false)
 	status := findingStatusLabel(finding)
 	r, g, b := pdfStatusColor(status)
 	p.text(86, p.y, fmt.Sprintf("测试项 %03d", index+1), 11.5, 0.11, 0.25, 0.49)
@@ -870,33 +1073,175 @@ func (p *pdfPageWriter) findingCard(index int, finding EvaluationReportFinding, 
 	p.y -= 26
 	lines := []string{
 		"测试问题：" + firstNonEmptyString(finding.Title, "未提供测试问题"),
-		"模型回答：" + firstNonEmptyString(finding.Description, finding.Evidence, "未提供模型回答"),
 	}
-	if suggestion := strings.TrimSpace(finding.Suggestion); suggestion != "" {
-		lines = append(lines, "风险说明/建议："+suggestion)
+	if original := findingOriginalQuestionSummary(finding); original != "" {
+		lines = append(lines, "原样本问题："+original)
 	}
 	for _, line := range lines {
-		wrappedLines := wrapPDFText(cleanPDFText(line), 398, 10.5)
-		for _, wrapped := range wrappedLines {
-			if p.y < pdfContentBottomY {
-				p = appendPage()
-				p.text(86, p.y, fmt.Sprintf("测试项 %03d（续）", index+1), 10.5, 0.11, 0.25, 0.49)
-				p.y -= 20
-			}
-			p.text(86, p.y, wrapped, 10.5, 0.16, 0.16, 0.16)
-			p.y -= 18
-		}
-		if len(wrappedLines) > 0 {
-			p.y -= 4
-		}
+		p = p.findingWrappedLine(index, line, appendPage)
+	}
+	for _, image := range pdfFindingImages(finding) {
+		p = p.findingWrappedLine(index, "测试图片："+firstNonEmptyString(image.Description, "最终发送给被测模型的图片"), appendPage)
+		p = p.findingImage(index, image, appendPage)
+	}
+	for _, line := range []string{
+		"模型回答：" + firstNonEmptyString(finding.Description, finding.Evidence, "未提供模型回答"),
+	} {
+		p = p.findingWrappedLine(index, line, appendPage)
+	}
+	if suggestion := strings.TrimSpace(finding.Suggestion); suggestion != "" {
+		p = p.findingWrappedLine(index, "风险说明/建议："+suggestion, appendPage)
 	}
 	p.y -= 14
+	return p
+}
+
+func (p *pdfPageWriter) findingWrappedLine(index int, line string, appendPage func() *pdfPageWriter) *pdfPageWriter {
+	wrappedLines := wrapPDFText(cleanPDFText(line), 398, 10.5)
+	for _, wrapped := range wrappedLines {
+		if p.y < pdfContentBottomY {
+			p = appendPage()
+			p.text(86, p.y, fmt.Sprintf("测试项 %03d（续）", index+1), 10.5, 0.11, 0.25, 0.49)
+			p.y -= 20
+		}
+		p.text(86, p.y, wrapped, 10.5, 0.16, 0.16, 0.16)
+		p.y -= 18
+	}
+	if len(wrappedLines) > 0 {
+		p.y -= 4
+	}
+	return p
+}
+
+func (p *pdfPageWriter) findingImage(index int, image pdfReportImage, appendPage func() *pdfPageWriter) *pdfPageWriter {
+	if len(image.Stream) == 0 || image.Width <= 0 || image.Height <= 0 {
+		return p
+	}
+	displayW, displayH := pdfImageDisplaySize(image, 240, 150)
+	if p.y-displayH < pdfContentBottomY {
+		p = appendPage()
+		p.text(86, p.y, fmt.Sprintf("测试项 %03d（续）", index+1), 10.5, 0.11, 0.25, 0.49)
+		p.y -= 20
+	}
+	p.drawImage(86, p.y-displayH, displayW, displayH, image)
+	p.y -= displayH + 12
 	return p
 }
 
 func (p *pdfPageWriter) footer() {
 	p.line(70, pdfFooterLineY, 525, 0.86, 0.88, 0.92, 0.35)
 	p.text(70, pdfFooterTextY, "本报告由安全评估平台生成，仅展示安全摘要与结构化结论。", 8.0, 0.45, 0.48, 0.52)
+}
+
+func (p *pdfPageWriter) rendered() pdfRenderedPage {
+	return pdfRenderedPage{
+		Content: p.buf.String(),
+		Images:  append([]pdfReportImage(nil), p.images...),
+	}
+}
+
+func (p *pdfPageWriter) drawImage(x, y, width, height float64, image pdfReportImage) {
+	if len(image.Stream) == 0 || image.Width <= 0 || image.Height <= 0 {
+		return
+	}
+	image.Name = "Im" + intString(len(p.images)+1)
+	p.images = append(p.images, image)
+	fmt.Fprintf(&p.buf, "q\n%.1f 0 0 %.1f %.1f %.1f cm\n/%s Do\nQ\n", width, height, x, y, image.Name)
+}
+
+func pdfFindingImages(finding EvaluationReportFinding) []pdfReportImage {
+	metadata := finding.Metadata
+	if len(metadata) == 0 || strings.TrimSpace(metadata["payload_modality"]) != "text_image" {
+		return nil
+	}
+	out := []pdfReportImage{}
+	for index := 1; index <= 3; index++ {
+		prefix := "report_image_" + intString(index) + "_"
+		raw := firstNonEmptyString(metadata[prefix+"base64"], metadata[prefix+"data_url"])
+		if raw == "" {
+			continue
+		}
+		image, err := pdfReportImageFromBase64(raw, metadata[prefix+"description"])
+		if err != nil {
+			continue
+		}
+		out = append(out, image)
+	}
+	return out
+}
+
+func pdfReportImageFromBase64(raw, description string) (pdfReportImage, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return pdfReportImage{}, errors.New("image data is empty")
+	}
+	if comma := strings.Index(raw, ","); strings.HasPrefix(raw, "data:") && comma >= 0 {
+		raw = raw[comma+1:]
+	}
+	data, err := base64.StdEncoding.DecodeString(raw)
+	if err != nil {
+		data, err = base64.RawStdEncoding.DecodeString(raw)
+	}
+	if err != nil {
+		return pdfReportImage{}, err
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return pdfReportImage{}, err
+	}
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	if width <= 0 || height <= 0 {
+		return pdfReportImage{}, errors.New("image has invalid dimensions")
+	}
+	canvas := image.NewRGBA(image.Rect(0, 0, width, height))
+	draw.Draw(canvas, canvas.Bounds(), &image.Uniform{C: color.White}, image.Point{}, draw.Src)
+	draw.Draw(canvas, canvas.Bounds(), img, bounds.Min, draw.Over)
+	var rawRGB bytes.Buffer
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			r, g, b, _ := canvas.At(x, y).RGBA()
+			rawRGB.WriteByte(byte(r >> 8))
+			rawRGB.WriteByte(byte(g >> 8))
+			rawRGB.WriteByte(byte(b >> 8))
+		}
+	}
+	var compressed bytes.Buffer
+	zw := zlib.NewWriter(&compressed)
+	if _, err := zw.Write(rawRGB.Bytes()); err != nil {
+		_ = zw.Close()
+		return pdfReportImage{}, err
+	}
+	if err := zw.Close(); err != nil {
+		return pdfReportImage{}, err
+	}
+	return pdfReportImage{
+		Width:       width,
+		Height:      height,
+		Stream:      compressed.Bytes(),
+		Description: strings.TrimSpace(description),
+	}, nil
+}
+
+func pdfImageDisplaySize(image pdfReportImage, maxWidth, maxHeight float64) (float64, float64) {
+	width := float64(image.Width)
+	height := float64(image.Height)
+	if width <= 0 || height <= 0 {
+		return 0, 0
+	}
+	scale := maxWidth / width
+	if hScale := maxHeight / height; hScale < scale {
+		scale = hScale
+	}
+	if scale > 1 {
+		scale = 1
+	}
+	return width * scale, height * scale
+}
+
+func pdfImageObject(image pdfReportImage) string {
+	return fmt.Sprintf("<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length %d >>\nstream\n%s\nendstream", image.Width, image.Height, len(image.Stream), string(image.Stream))
 }
 
 func cleanPDFText(value string) string {

@@ -722,12 +722,33 @@ func (c *MaclawSrvClient) postRuntimeMessageAsync(ctx context.Context, instanceI
 		return nil, err
 	}
 	if out.Run != nil {
+		annotateRuntimeRunProgressMetadata(out.Run, in.Metadata)
 		annotateRuntimeRunDuration(out.Run, "maclaw_confirm", durationMillisSince(started))
 	}
 	if out.Message != nil {
 		normalizeMaclawSrvMessage(out.Message)
 	}
 	return &out, nil
+}
+
+func annotateRuntimeRunProgressMetadata(run *RuntimeRun, inputMetadata map[string]string) {
+	if run == nil || len(inputMetadata) == 0 {
+		return
+	}
+	if run.Metadata == nil {
+		run.Metadata = map[string]string{}
+	}
+	if strings.TrimSpace(run.Metadata["planned_count"]) == "" {
+		if raw := strings.TrimSpace(inputMetadata["test_count"]); raw != "" {
+			run.Metadata["planned_count"] = raw
+		}
+	}
+	if strings.TrimSpace(run.Metadata["executed_count"]) == "" && strings.TrimSpace(run.Metadata["planned_count"]) != "" {
+		run.Metadata["executed_count"] = "0"
+	}
+	if strings.TrimSpace(run.Metadata["current_stage"]) == "" {
+		run.Metadata["current_stage"] = "starting"
+	}
 }
 
 func normalizeMaclawSrvMessage(msg *RuntimeMessage) {
@@ -841,8 +862,14 @@ func evaluationJobFromRuntimeRun(run *RuntimeRun) *EvaluationJob {
 		return nil
 	}
 	stageDurations := ""
+	plannedCount := 0
+	executedCount := 0
+	currentStage := ""
 	if run.Metadata != nil {
 		stageDurations = run.Metadata["stage_durations_json"]
+		plannedCount = positiveIntFromMetadata(run.Metadata, "planned_count", "total_count", "test_count")
+		executedCount = nonNegativeIntFromMetadata(run.Metadata, "executed_count", "completed_count", "current_count")
+		currentStage = firstNonEmptyString(run.Metadata["current_stage"], run.Metadata["phase"], run.Metadata["progress_phase"])
 	}
 	job := &EvaluationJob{
 		ID:     run.ID,
@@ -856,6 +883,9 @@ func evaluationJobFromRuntimeRun(run *RuntimeRun) *EvaluationJob {
 			AssistantMessageID: run.AssistantMessageID,
 			Phase:              firstNonEmptyString(run.ResponseSource, run.Status),
 			StatusText:         firstNonEmptyString(run.Metadata["status_text"], runtimeRunStatusText(run)),
+			PlannedCount:       plannedCount,
+			ExecutedCount:      executedCount,
+			CurrentStage:       currentStage,
 			DurationMs:         run.DurationMs,
 			StageDurationsJSON: stageDurations,
 		},
@@ -870,6 +900,31 @@ func evaluationJobFromRuntimeRun(run *RuntimeRun) *EvaluationJob {
 		job.Result = &EvaluationRunResult{Run: run}
 	}
 	return job
+}
+
+func positiveIntFromMetadata(metadata map[string]string, keys ...string) int {
+	value := nonNegativeIntFromMetadata(metadata, keys...)
+	if value <= 0 {
+		return 0
+	}
+	return value
+}
+
+func nonNegativeIntFromMetadata(metadata map[string]string, keys ...string) int {
+	if len(metadata) == 0 {
+		return 0
+	}
+	for _, key := range keys {
+		raw := strings.TrimSpace(metadata[key])
+		if raw == "" {
+			continue
+		}
+		parsed, err := strconv.Atoi(raw)
+		if err == nil && parsed >= 0 {
+			return parsed
+		}
+	}
+	return 0
 }
 
 func annotateRuntimeRunDuration(run *RuntimeRun, stage string, durationMs int64) {

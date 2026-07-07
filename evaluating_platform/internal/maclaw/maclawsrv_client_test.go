@@ -133,7 +133,17 @@ func TestMaclawSrvClientConfirmMapsRunToEvaluationJob(t *testing.T) {
 			t.Fatalf("confirm metadata = %#v", in.Metadata)
 		}
 		_ = json.NewEncoder(w).Encode(RuntimeMessageResponse{
-			Run:     &RuntimeRun{ID: "run_confirm", SessionID: "sess_1", Status: "running", ResponseSource: "plan_confirm"},
+			Run: &RuntimeRun{
+				ID:             "run_confirm",
+				SessionID:      "sess_1",
+				Status:         "running",
+				ResponseSource: "plan_confirm",
+				Metadata: map[string]string{
+					"planned_count":  "20",
+					"executed_count": "4",
+					"current_stage":  "target_calls",
+				},
+			},
 			Message: &RuntimeMessage{ID: "msg_confirm", Role: "assistant", Content: `{"status":"accepted"}`},
 		})
 	}))
@@ -158,6 +168,9 @@ func TestMaclawSrvClientConfirmMapsRunToEvaluationJob(t *testing.T) {
 	}
 	if job.Progress.DurationMs <= 0 || !strings.Contains(job.Progress.StageDurationsJSON, "maclaw_confirm") {
 		t.Fatalf("progress should include safe confirm duration metadata: %#v", job.Progress)
+	}
+	if job.Progress.PlannedCount != 20 || job.Progress.ExecutedCount != 4 || job.Progress.CurrentStage != "target_calls" {
+		t.Fatalf("progress counts = %#v", job.Progress)
 	}
 }
 

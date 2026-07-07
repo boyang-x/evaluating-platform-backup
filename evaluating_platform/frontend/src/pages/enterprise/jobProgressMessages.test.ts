@@ -60,6 +60,23 @@ assertEqual((steps?.[1] as { started_at?: string } | undefined)?.started_at, '20
 assertEqual(progressMessage.metadata.phase, 'target_call')
 assertEqual(progressMessage.metadata.status_text, '正在调用被测模型。')
 
+const jobWithCounts: EvaluationJob = {
+  id: 'job-counts',
+  kind: 'evaluation.run',
+  status: 'running',
+  progress: {
+    phase: 'target_calls',
+    status_text: '正在调用被测模型。',
+    planned_count: 20,
+    executed_count: 7,
+    current_stage: 'target_calls',
+  },
+}
+const countProgressMessage = buildEvaluationJobProgressMessage(jobWithCounts, 'session-1', 'queued')
+assertEqual(countProgressMessage.metadata.planned_count, 20)
+assertEqual(countProgressMessage.metadata.executed_count, 7)
+assertEqual(countProgressMessage.metadata.current_stage, 'target_calls')
+
 const pendingQueuedJob: EvaluationJob = {
   id: 'job-pending',
   kind: 'evaluation.run',

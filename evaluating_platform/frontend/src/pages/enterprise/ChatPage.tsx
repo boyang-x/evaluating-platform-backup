@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type MouseEvent, type SetStateAction } from 'react'
-import { Button, Drawer, Form, Input, Select, Space, message } from 'antd'
+import { Button, Drawer, Form, Input, Select, Space, Switch, message } from 'antd'
 import { ApiOutlined, DeleteOutlined, LoadingOutlined, PlusOutlined, SendOutlined } from '@ant-design/icons'
 
 import type { ChatMessage, ChatSession, WelcomeCapability } from '../../services/chat'
@@ -36,6 +36,7 @@ function buildConfirmProgressMessage(sessionId: string, planMessageId: string, p
     metadata: {
       card_type: 'progress',
       phase: 'starting',
+      current_stage: 'starting',
       status_text: '已确认执行，正在启动 MaClaw 评估任务...',
       planned_count: plannedCount,
       executed_count: 0,
@@ -236,7 +237,7 @@ export function ChatPage() {
   }, [applySessionSnapshot, loadSessions, markSessionRunning])
 
   const waitForEvaluationJob = useCallback(async (jobId: string, sessionId: string) => {
-    for (let attempt = 0; attempt < 120; attempt += 1) {
+    for (let attempt = 0; attempt < 650; attempt += 1) {
       if (activeIdRef.current !== sessionId) return
       const job = await chatService.getEvaluationJob(jobId)
       if (job.status === 'succeeded') {
@@ -282,11 +283,18 @@ export function ChatPage() {
       }
       const run = jobRunToStream(job, sessionId)
       if (run?.id) {
+        const card = buildEvaluationJobProgressMessage(job, sessionId, 'queued')
         setMessages(previous => prepareMessagesForDisplay(
-          previous.filter(message => message.id !== `job-${jobId}-queued`),
+          [
+            ...previous.filter(message => message.id !== card.id),
+            card,
+          ],
         ))
-        startRunStream(run, sessionId)
-        return
+        if (!streamStopRef.current) {
+          startRunStream(run, sessionId)
+        }
+        await new Promise(resolve => window.setTimeout(resolve, 1000))
+        continue
       }
       await new Promise(resolve => window.setTimeout(resolve, 1000))
     }
@@ -482,10 +490,14 @@ export function ChatPage() {
       ]))
       if (result.run?.id) {
         startRunStream(result.run, sessionId)
+        if (result.job?.id) {
+          void waitForEvaluationJob(result.job.id, sessionId)
+        }
       } else if (result.job?.id) {
         const run = jobRunToStream(result.job, sessionId)
         if (run?.id) {
           startRunStream(run, sessionId)
+          void waitForEvaluationJob(result.job.id, sessionId)
         } else {
           void waitForEvaluationJob(result.job.id, sessionId)
         }
@@ -540,6 +552,7 @@ export function ChatPage() {
           base_url: target.base_url,
           model: target.model,
           credential_secret: '',
+          supports_vision: target.metadata?.supports_vision === 'true',
         })
       } else {
         setCurrentTarget(null)
@@ -565,6 +578,7 @@ export function ChatPage() {
         status: 'published',
         metadata: {
           health_url: `${String(values.base_url || '').replace(/\/+$/, '')}/models`,
+          supports_vision: values.supports_vision ? 'true' : 'false',
         },
       })
       setCurrentTarget(target)
@@ -737,7 +751,7 @@ export function ChatPage() {
           </Space>
         )}
       >
-        <Form form={targetForm} layout="vertical" initialValues={{ name: '默认被测模型', provider: 'openai', auth_type: 'bearer' }}>
+        <Form form={targetForm} layout="vertical" initialValues={{ name: '默认被测模型', provider: 'openai', auth_type: 'bearer', supports_vision: false }}>
           <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入名称' }]}>
             <Input placeholder="默认被测模型" />
           </Form.Item>
@@ -756,6 +770,14 @@ export function ChatPage() {
           </Form.Item>
           <Form.Item label="API Key" name="credential_secret" extra="密钥只写入 maclaw，不会回显明文。留空表示沿用已保存密钥。">
             <Input.Password placeholder="sk-..." autoComplete="new-password" />
+          </Form.Item>
+          <Form.Item
+            label="支持图片输入"
+            name="supports_vision"
+            valuePropName="checked"
+            extra="仅在被测模型支持 OpenAI-compatible 图文输入时开启；DeepSeek 文本模型请保持关闭。"
+          >
+            <Switch />
           </Form.Item>
         </Form>
       </Drawer>

@@ -67,7 +67,7 @@ func main() {
 
 	var minioClient *storage.MinIOClient
 	if cfg.Storage.Endpoint != "" {
-		mc, err := storage.NewMinIOClient(cfg.Storage)
+		mc, err := newMinIOClientWithRetry(cfg.Storage, 30, 2*time.Second)
 		if err != nil {
 			logger.Warn("MinIO unavailable, upload features disabled", map[string]interface{}{"err": err.Error()})
 		} else {
@@ -127,12 +127,8 @@ func main() {
 	adminHandler := handler.NewAdminHandler(userRepo, billingRepo)
 	enterpriseWelcomeHandler := handler.NewEnterpriseWelcomeHandler()
 	tplHandler := handler.NewTemplateHandler(tplRepo)
-	var sampleHandler *handler.AttackSampleHandler
-	var composedAttackHandler *handler.ComposedAttackHandler
-	if sampleManager != nil {
-		sampleHandler = handler.NewAttackSampleHandler(sampleRepo, sampleManager, sampleLoader, minioClient)
-		composedAttackHandler = handler.NewComposedAttackHandler(composedAttackRepo, composedAttackManager, composedAttackLoader, minioClient)
-	}
+	sampleHandler := handler.NewAttackSampleHandler(sampleRepo, sampleManager, sampleLoader, minioClient)
+	composedAttackHandler := handler.NewComposedAttackHandler(composedAttackRepo, composedAttackManager, composedAttackLoader, minioClient)
 	maclawProvider, maclawProjection, maclawSkillProjection, maclawCapabilityCatalog := buildMaclawRuntime(
 		cfg,
 		userRepo,
@@ -307,16 +303,14 @@ func main() {
 			expert.GET("/billing/earnings", billingHandler.GetExpertEarnings)
 			expert.GET("/tools/categories", legacyGone)
 
-			if sampleHandler != nil {
-				expert.POST("/samples", sampleHandler.Upload)
-				expert.GET("/samples", sampleHandler.List)
-				expert.DELETE("/samples/:id", sampleHandler.Delete)
-				expert.GET("/samples/:id/preview", sampleHandler.Preview)
-				expert.POST("/composed-attacks", composedAttackHandler.Upload)
-				expert.GET("/composed-attacks", composedAttackHandler.List)
-				expert.DELETE("/composed-attacks/:id", composedAttackHandler.Delete)
-				expert.GET("/composed-attacks/:id/preview", composedAttackHandler.Preview)
-			}
+			expert.POST("/samples", sampleHandler.Upload)
+			expert.GET("/samples", sampleHandler.List)
+			expert.DELETE("/samples/:id", sampleHandler.Delete)
+			expert.GET("/samples/:id/preview", sampleHandler.Preview)
+			expert.POST("/composed-attacks", composedAttackHandler.Upload)
+			expert.GET("/composed-attacks", composedAttackHandler.List)
+			expert.DELETE("/composed-attacks/:id", composedAttackHandler.Delete)
+			expert.GET("/composed-attacks/:id/preview", composedAttackHandler.Preview)
 
 			expert.POST("/templates", tplHandler.Create)
 			expert.GET("/templates", tplHandler.List)
@@ -429,6 +423,31 @@ func runMigrations(ctx context.Context, pgPool *pgxpool.Pool) {
 		}
 	}
 	logger.Info("database migration completed")
+}
+
+func newMinIOClientWithRetry(cfg config.StorageConfig, attempts int, delay time.Duration) (*storage.MinIOClient, error) {
+	if attempts <= 0 {
+		attempts = 1
+	}
+	if delay <= 0 {
+		delay = time.Second
+	}
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		client, err := storage.NewMinIOClient(cfg)
+		if err == nil {
+			if attempt > 1 {
+				logger.Info("MinIO connected after retry", map[string]interface{}{"attempt": attempt, "endpoint": cfg.Endpoint})
+			}
+			return client, nil
+		}
+		lastErr = err
+		if attempt < attempts {
+			logger.Warn("MinIO not ready, retrying", map[string]interface{}{"attempt": attempt, "err": err.Error()})
+			time.Sleep(delay)
+		}
+	}
+	return nil, lastErr
 }
 
 func buildMaclawRuntime(
