@@ -2,7 +2,6 @@
 import {
   Button,
   Card,
-  Checkbox,
   Col,
   Empty,
   Form,
@@ -22,11 +21,11 @@ import {
   DeleteOutlined,
   EditOutlined,
   EyeOutlined,
+  FolderOutlined,
   PlusOutlined,
   UploadOutlined,
 } from '@ant-design/icons'
 import { expertService } from '../../services/expert'
-import { AuxLLMConfig } from '../../components/AuxLLMConfig'
 import { ComposedAttackManager } from './ComposedAttackManager'
 
 const { Paragraph, Text, Title } = Typography
@@ -44,7 +43,7 @@ interface TemplateRecord {
   updated_at?: string
 }
 
-interface TemplateBatch {
+interface TemplateCategoryGroup {
   id: string
   name: string
   templates: TemplateRecord[]
@@ -52,29 +51,43 @@ interface TemplateBatch {
   latestUpdatedAt: string
 }
 
-interface TemplateBatchAccumulator extends TemplateBatch {
-  clusterTimestamp: number
-  heuristicKey?: string
-}
-
 const templateSubTypeLabel: Record<string, string> = {
-  role_play: '角色扮演',
-  multilingual: '多语言增强',
-  encoding_evasion: '编码规避',
+  角色身份扮演: '角色身份扮演',
+  虚拟叙事保护: '虚拟叙事保护',
+  系统指令注入: '系统指令注入',
+  DAN模式: 'DAN模式',
+  游戏化包装: '游戏化包装',
+  双重人格回答: '双重人格回答',
+  邪恶AI召唤: '邪恶AI召唤',
+  '编码／格式混淆': '编码／格式混淆',
+  role_play: '角色身份扮演',
+  multilingual: '多语言增强（历史）',
+  encoding_evasion: '编码／格式混淆（历史）',
 }
 
-const availableLanguages = [
-  { value: 'en', label: 'English' },
-  { value: 'ja', label: '日语' },
-  { value: 'ko', label: '韩语' },
-  { value: 'fr', label: '法语' },
-  { value: 'de', label: '德语' },
-  { value: 'es', label: '西班牙语' },
-  { value: 'ru', label: '俄语' },
-  { value: 'ar', label: '阿拉伯语' },
+const builtinTemplateCategories = [
+  '角色身份扮演',
+  '虚拟叙事保护',
+  '系统指令注入',
+  'DAN模式',
+  '游戏化包装',
+  '双重人格回答',
+  '邪恶AI召唤',
+  '编码／格式混淆',
 ]
 
-const LEGACY_BATCH_WINDOW_MS = 15000
+function templateCategoryOptions(extra: string[] = []) {
+  const seen = new Set<string>()
+  return [...builtinTemplateCategories, ...extra]
+    .filter((value) => {
+      if (!value || seen.has(value)) {
+        return false
+      }
+      seen.add(value)
+      return true
+    })
+    .map((value) => ({ value, label: templateSubTypeLabel[value] || value }))
+}
 
 function formatDate(value?: string) {
   if (!value) {
@@ -100,89 +113,48 @@ function toTimestamp(value?: string) {
   return Number.isNaN(time) ? 0 : time
 }
 
-function buildTemplateBatches(templates: TemplateRecord[]) {
-  const explicitCounts = new Map<string, number>()
+function buildTemplateCategoryGroups(templates: TemplateRecord[]) {
+  const groupMap = new Map<string, TemplateCategoryGroup>()
+  builtinTemplateCategories.forEach((category) => {
+    groupMap.set(category, {
+      id: `category-${category}`,
+      name: templateSubTypeLabel[category] || category,
+      templates: [],
+      subTypes: [category],
+      latestUpdatedAt: '',
+    })
+  })
+
   templates.forEach((template) => {
-    if (template.upload_batch_id) {
-      explicitCounts.set(template.upload_batch_id, (explicitCounts.get(template.upload_batch_id) || 0) + 1)
+    const category = template.sub_type || '未分类'
+    const existing = groupMap.get(category) || {
+      id: `category-${category}`,
+      name: templateSubTypeLabel[category] || category,
+      templates: [],
+      subTypes: [category],
+      latestUpdatedAt: '',
     }
-  })
-
-  const explicitGroups = new Map<string, TemplateBatchAccumulator>()
-  const legacyGroupsByKey = new Map<string, TemplateBatchAccumulator[]>()
-  const accumulators: TemplateBatchAccumulator[] = []
-
-  const sortedTemplates = [...templates].sort((a, b) => toTimestamp(a.created_at) - toTimestamp(b.created_at))
-
-  sortedTemplates.forEach((template) => {
-    const explicitBatchID = template.upload_batch_id || ''
-    const explicitBatchName = template.upload_batch_name || template.name || '未命名模板集合'
+    existing.templates.push(template)
     const updatedAt = template.updated_at || template.created_at || ''
-    const updatedAtMs = toTimestamp(updatedAt)
-
-    if (explicitBatchID && (explicitCounts.get(explicitBatchID) || 0) > 1) {
-      const existing = explicitGroups.get(explicitBatchID)
-      if (existing) {
-        existing.templates.push(template)
-        if (!existing.subTypes.includes(template.sub_type)) {
-          existing.subTypes.push(template.sub_type)
-        }
-        if (updatedAtMs > toTimestamp(existing.latestUpdatedAt)) {
-          existing.latestUpdatedAt = updatedAt
-          existing.clusterTimestamp = updatedAtMs
-        }
-        return
-      }
-
-      const created: TemplateBatchAccumulator = {
-        id: explicitBatchID,
-        name: explicitBatchName,
-        templates: [template],
-        subTypes: [template.sub_type],
-        latestUpdatedAt: updatedAt,
-        clusterTimestamp: updatedAtMs,
-      }
-      explicitGroups.set(explicitBatchID, created)
-      accumulators.push(created)
-      return
+    if (toTimestamp(updatedAt) > toTimestamp(existing.latestUpdatedAt)) {
+      existing.latestUpdatedAt = updatedAt
     }
-
-    const heuristicName = (template.upload_batch_name || template.name || '').trim().toLowerCase()
-    const heuristicKey = `${heuristicName}::${template.sub_type}`
-    const candidates = legacyGroupsByKey.get(heuristicKey) || []
-    const matched = [...candidates].reverse().find((group) => Math.abs(updatedAtMs - group.clusterTimestamp) <= LEGACY_BATCH_WINDOW_MS)
-
-    if (matched) {
-      matched.templates.push(template)
-      if (updatedAtMs > toTimestamp(matched.latestUpdatedAt)) {
-        matched.latestUpdatedAt = updatedAt
-        matched.clusterTimestamp = updatedAtMs
-      }
-      return
-    }
-
-    const created: TemplateBatchAccumulator = {
-      id: explicitBatchID || `legacy-${template.id}`,
-      name: explicitBatchName,
-      templates: [template],
-      subTypes: [template.sub_type],
-      latestUpdatedAt: updatedAt,
-      clusterTimestamp: updatedAtMs,
-      heuristicKey,
-    }
-    legacyGroupsByKey.set(heuristicKey, [...candidates, created])
-    accumulators.push(created)
+    groupMap.set(category, existing)
   })
 
-  return accumulators
-    .map((batch) => ({
-      id: batch.id,
-      name: batch.name,
-      subTypes: batch.subTypes,
-      latestUpdatedAt: batch.latestUpdatedAt,
-      templates: [...batch.templates].sort((a, b) => toTimestamp(b.updated_at || b.created_at) - toTimestamp(a.updated_at || a.created_at)),
+  return Array.from(groupMap.values())
+    .map((group) => ({
+      ...group,
+      templates: [...group.templates].sort((a, b) => toTimestamp(b.updated_at || b.created_at) - toTimestamp(a.updated_at || a.created_at)),
     }))
-    .sort((a, b) => toTimestamp(b.latestUpdatedAt) - toTimestamp(a.latestUpdatedAt))
+    .sort((a, b) => {
+      const aBuiltin = builtinTemplateCategories.indexOf(a.subTypes[0])
+      const bBuiltin = builtinTemplateCategories.indexOf(b.subTypes[0])
+      if (aBuiltin >= 0 && bBuiltin >= 0) return aBuiltin - bBuiltin
+      if (aBuiltin >= 0) return -1
+      if (bBuiltin >= 0) return 1
+      return a.name.localeCompare(b.name, 'zh-CN')
+    })
 }
 
 export function EngineManager() {
@@ -192,10 +164,8 @@ export function EngineManager() {
   const [showTemplateModal, setShowTemplateModal] = useState(false)
   const [showCSVUpload, setShowCSVUpload] = useState(false)
   const [showBatchModal, setShowBatchModal] = useState(false)
-  const [selectedBatch, setSelectedBatch] = useState<TemplateBatch | null>(null)
+  const [selectedBatch, setSelectedBatch] = useState<TemplateCategoryGroup | null>(null)
   const [editingTemplate, setEditingTemplate] = useState<TemplateRecord | null>(null)
-  const [enhanceStrategy, setEnhanceStrategy] = useState<string>('none')
-  const [targetLanguages, setTargetLanguages] = useState<string[]>(['en', 'ja', 'ko'])
   const [templateForm] = Form.useForm()
   const [csvForm] = Form.useForm()
 
@@ -212,7 +182,8 @@ export function EngineManager() {
     loadTemplates()
   }, [loadTemplates])
 
-  const templateBatches = useMemo(() => buildTemplateBatches(templates), [templates])
+  const templateBatches = useMemo(() => buildTemplateCategoryGroups(templates), [templates])
+  const templateTypeOptions = useMemo(() => templateCategoryOptions(templates.map((item) => item.sub_type)), [templates])
 
   const refreshSelectedBatch = useCallback((batchID: string) => {
     const nextBatch = templateBatches.find((item) => item.id === batchID) || null
@@ -274,17 +245,41 @@ export function EngineManager() {
     }
   }
 
-  const handleDeleteBatch = async (batch: TemplateBatch) => {
+  const loadAllTemplatesForSubTypes = async (subTypes: string[]) => {
+    const pageSize = 200
+    const byID = new Map<string, TemplateRecord>()
+    for (const subType of subTypes) {
+      let offset = 0
+      for (;;) {
+        const res = await expertService.listTemplates({ sub_type: subType, limit: pageSize, offset })
+        const pageItems = ((res.items || []) as TemplateRecord[]).filter((item) => item.id)
+        pageItems.forEach((item) => byID.set(item.id, item))
+        const total = Number(res.total || 0)
+        offset += pageSize
+        if (pageItems.length < pageSize || (total > 0 && offset >= total)) {
+          break
+        }
+      }
+    }
+    return Array.from(byID.values())
+  }
+
+  const handleDeleteBatch = async (batch: TemplateCategoryGroup) => {
     try {
-      await Promise.all(batch.templates.map((template) => expertService.deleteTemplate(template.id)))
-      message.success(`模板集合“${batch.name}”已删除`)
+      const allTemplates = await loadAllTemplatesForSubTypes(batch.subTypes)
+      if (allTemplates.length === 0) {
+        message.info('该分类下暂无模板')
+        return
+      }
+      await Promise.all(allTemplates.map((template) => expertService.deleteTemplate(template.id)))
+      message.success(`分类“${batch.name}”下的模板已删除`)
       if (selectedBatch?.id === batch.id) {
         setShowBatchModal(false)
         setSelectedBatch(null)
       }
       loadTemplates()
     } catch (error: unknown) {
-      message.error((error as Error).message || '删除模板集合失败')
+      message.error((error as Error).message || '删除分类模板失败')
     }
   }
 
@@ -292,7 +287,6 @@ export function EngineManager() {
     try {
       const values = await csvForm.validateFields()
       const formData = new FormData()
-      formData.append('sub_type', values.sub_type)
       formData.append('name', values.name)
       formData.append('file', values.file.file.originFileObj || values.file.file)
       await expertService.uploadTemplateCSV(formData)
@@ -314,7 +308,7 @@ export function EngineManager() {
           style={{ width: 180 }}
           options={[
             { value: '', label: '全部类型' },
-            ...Object.entries(templateSubTypeLabel).map(([value, label]) => ({ value, label })),
+            ...templateTypeOptions,
           ]}
         />
         <Button
@@ -341,105 +335,44 @@ export function EngineManager() {
 
       {templateBatches.length === 0 ? (
         <Card loading={loading}>
-          <Empty description="当前还没有模板集合，上传一次 CSV 后会在这里按批次展示。" />
+          <Empty description="当前还没有模板分类。" />
         </Card>
       ) : (
         <Row gutter={[16, 16]}>
           {templateBatches.map((batch) => (
-            <Col key={batch.id} xs={24} md={12} xl={8}>
+            <Col key={batch.id} xs={24} sm={12} lg={8} xl={6}>
               <Card
                 loading={loading}
                 hoverable
-                title={<Text style={{ color: 'var(--text-primary)' }}>{batch.name}</Text>}
-                extra={<Text style={{ color: 'var(--text-muted)', fontSize: 12 }}>{batch.templates.length} 条模板</Text>}
                 actions={[
                   <Button key="view" type="link" icon={<EyeOutlined />} onClick={() => { setSelectedBatch(batch); setShowBatchModal(true) }}>
-                    查看集合
+                    查看详情
                   </Button>,
                   <Popconfirm
                     key="delete"
-                    title={`确认删除模板集合“${batch.name}”吗？`}
-                    description="会删除这个集合下的全部模板。"
+                    title={`确认删除分类“${batch.name}”下的全部模板吗？`}
+                    description={batch.templates.length > 0 ? '会删除这个分类下的全部模板。' : '该分类当前没有模板。'}
                     onConfirm={() => handleDeleteBatch(batch)}
                   >
-                    <Button type="link" danger icon={<DeleteOutlined />}>
-                      删除整组
+                    <Button type="link" danger icon={<DeleteOutlined />} disabled={batch.templates.length === 0}>
+                      删除分类
                     </Button>
                   </Popconfirm>,
                 ]}
-                style={{ height: '100%', background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}
+                style={{ height: '100%', background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: 8 }}
+                bodyStyle={{ minHeight: 130, padding: 28 }}
               >
-                <Space size={[0, 8]} wrap style={{ marginBottom: 12 }}>
-                  {batch.subTypes.map((subType) => (
-                    <Tag key={subType} color="purple">
-                      {templateSubTypeLabel[subType] || subType}
-                    </Tag>
-                  ))}
-                </Space>
-
-                <div style={{ marginBottom: 12 }}>
-                  <Text style={{ color: 'var(--text-muted)', fontSize: 12 }}>集合说明</Text>
-                  <Paragraph style={{ color: 'var(--text-secondary)', minHeight: 44, marginBottom: 0 }} ellipsis={{ rows: 2 }}>
-                    {batch.templates[0]?.description || `这个集合包含 ${batch.templates.length} 条模板，会在内部作为同一批次管理。`}
-                  </Paragraph>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
+                  <FolderOutlined style={{ color: 'var(--text-primary)', fontSize: 22 }} />
+                  <Text style={{ color: 'var(--text-primary)', fontSize: 22, fontWeight: 700 }}>{batch.name}</Text>
                 </div>
-
-                <div style={{ marginBottom: 12 }}>
-                  <Text style={{ color: 'var(--text-muted)', fontSize: 12 }}>最近更新时间</Text>
-                  <div>
-                    <Text style={{ color: 'var(--text-secondary)' }}>{formatDate(batch.latestUpdatedAt)}</Text>
-                  </div>
-                </div>
-
-                <div>
-                  <Text style={{ color: 'var(--text-muted)', fontSize: 12 }}>模板编号预览</Text>
-                  <Space wrap style={{ marginTop: 8 }}>
-                    {batch.templates.slice(0, 8).map((template, index) => (
-                      <Tag key={template.id}>{`模板 ${index + 1}`}</Tag>
-                    ))}
-                    {batch.templates.length > 8 ? <Tag>{`+${batch.templates.length - 8}`}</Tag> : null}
-                  </Space>
-                </div>
+                <Text style={{ color: 'var(--text-muted)', fontSize: 14 }}>{batch.templates.length} 条模板</Text>
               </Card>
             </Col>
           ))}
         </Row>
       )}
     </div>
-  )
-
-  const enhanceTab = (
-    <Space direction="vertical" style={{ width: '100%' }} size="middle">
-      <div>
-        <Text style={{ color: 'var(--text-secondary)', marginBottom: 8, display: 'block' }}>增强策略</Text>
-        <Select
-          value={enhanceStrategy}
-          onChange={setEnhanceStrategy}
-          style={{ width: 240 }}
-          options={[
-            { value: 'none', label: '不增强，保持原始内容' },
-            { value: 'multilingual', label: '多语言增强' },
-          ]}
-        />
-      </div>
-
-      {enhanceStrategy === 'multilingual' && (
-        <div>
-          <Text style={{ color: 'var(--text-secondary)', marginBottom: 8, display: 'block' }}>目标语言</Text>
-          <Checkbox.Group value={targetLanguages} onChange={(value) => setTargetLanguages(value as string[])}>
-            <Space wrap>
-              {availableLanguages.map((lang) => (
-                <Checkbox key={lang.value} value={lang.value}>
-                  {lang.label}
-                </Checkbox>
-              ))}
-            </Space>
-          </Checkbox.Group>
-        </div>
-      )}
-
-      <AuxLLMConfig />
-    </Space>
   )
 
   return (
@@ -449,7 +382,7 @@ export function EngineManager() {
           引擎管理
         </Title>
         <Text style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
-          模板管理按上传批次展示，一张卡片代表一次上传的整批模板；历史数据也会尽量按同一波上传自动归并。
+          模板管理按分类展示，每个分类一个卡片；上传文件第二列的自定义分类会自动成为新的分类卡片。
         </Text>
       </div>
 
@@ -458,7 +391,6 @@ export function EngineManager() {
         items={[
           { key: 'templates', label: '模板管理', children: templateTab },
           { key: 'composed', label: '已组合攻击', children: <ComposedAttackManager /> },
-          { key: 'enhance', label: '增强引擎', children: enhanceTab },
         ]}
       />
 
@@ -476,7 +408,7 @@ export function EngineManager() {
       >
         <Form form={templateForm} layout="vertical">
           <Form.Item name="sub_type" label="模板类型" rules={[{ required: true, message: '请选择模板类型' }]}> 
-            <Select options={Object.entries(templateSubTypeLabel).map(([value, label]) => ({ value, label }))} />
+            <Select showSearch options={templateTypeOptions} />
           </Form.Item>
           <Form.Item name="name" label="模板名称" rules={[{ required: true, message: '请输入模板名称' }]}> 
             <Input placeholder="如：合规检测角色扮演模板" />
@@ -490,7 +422,7 @@ export function EngineManager() {
             rules={[{ required: true, message: '请输入模板内容' }]}
             extra="模板内容会在内部与样本问题拼接后，再送往被测 LLM。"
           >
-            <TextArea rows={8} placeholder="请输入模板内容，例如角色设定、上下文限制或测试前缀。" />
+            <TextArea rows={8} placeholder="请输入模板内容，可使用 {{sample}} 或 {{question}} 表示样本问题插入位置。" />
           </Form.Item>
         </Form>
       </Modal>
@@ -510,24 +442,21 @@ export function EngineManager() {
           <Form.Item name="name" label="集合名称" rules={[{ required: true, message: '请输入集合名称' }]}> 
             <Input placeholder="如：2026-04 合规测试模板集" />
           </Form.Item>
-          <Form.Item name="sub_type" label="模板类型" rules={[{ required: true, message: '请选择模板类型' }]}> 
-            <Select options={Object.entries(templateSubTypeLabel).map(([value, label]) => ({ value, label }))} />
-          </Form.Item>
           <Form.Item
             name="file"
-            label="CSV 文件"
-            rules={[{ required: true, message: '请上传 CSV 文件' }]}
-            extra="格式：两列（序号, 模板内容），无需表头。一次上传会作为一个模板集合管理。"
+            label="Excel / CSV 文件"
+            rules={[{ required: true, message: '请上传 Excel 或 CSV 文件' }]}
+            extra="格式：三列（序号, 分类名称, 模板内容），可带表头。分类名称支持内置分类或自定义扩展分类。"
           >
-            <Upload accept=".csv" maxCount={1} beforeUpload={() => false}>
-              <Button icon={<UploadOutlined />}>选择 CSV 文件</Button>
+            <Upload accept=".xlsx,.csv" maxCount={1} beforeUpload={() => false}>
+              <Button icon={<UploadOutlined />}>选择 Excel / CSV 文件</Button>
             </Upload>
           </Form.Item>
         </Form>
       </Modal>
 
       <Modal
-        title={selectedBatch ? `模板集合：${selectedBatch.name}` : '模板集合详情'}
+        title={selectedBatch ? `模板分类：${selectedBatch.name}` : '模板分类详情'}
         open={showBatchModal}
         onCancel={() => {
           setShowBatchModal(false)
@@ -541,7 +470,7 @@ export function EngineManager() {
             <Card size="small" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-color)' }}>
               <Space direction="vertical" size={4} style={{ width: '100%' }}>
                 <Text style={{ color: 'var(--text-secondary)' }}>模板数量：{selectedBatch.templates.length}</Text>
-                <Text style={{ color: 'var(--text-secondary)' }}>最近更新时间：{formatDate(selectedBatch.latestUpdatedAt)}</Text>
+                <Text style={{ color: 'var(--text-secondary)' }}>最近更新时间：{selectedBatch.latestUpdatedAt ? formatDate(selectedBatch.latestUpdatedAt) : '暂无模板'}</Text>
                 <Space size={[0, 8]} wrap>
                   {selectedBatch.subTypes.map((subType) => (
                     <Tag key={subType} color="purple">
@@ -552,44 +481,50 @@ export function EngineManager() {
               </Space>
             </Card>
 
-            <Row gutter={[12, 12]}>
-              {selectedBatch.templates.map((template, index) => (
-                <Col key={template.id} span={24}>
-                  <Card
-                    size="small"
-                    title={<Text style={{ color: 'var(--text-primary)' }}>模板 {index + 1}</Text>}
-                    extra={
-                      <Space>
-                        <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEditTemplate(template)}>
-                          编辑
-                        </Button>
-                        <Popconfirm title="确认删除这条模板吗？" onConfirm={() => handleDeleteTemplate(template.id)}>
-                          <Button type="link" size="small" danger icon={<DeleteOutlined />}>
-                            删除
+            {selectedBatch.templates.length === 0 ? (
+              <Card style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}>
+                <Empty description="该分类下暂无模板，上传或新建模板后会显示在这里。" />
+              </Card>
+            ) : (
+              <Row gutter={[12, 12]}>
+                {selectedBatch.templates.map((template, index) => (
+                  <Col key={template.id} span={24}>
+                    <Card
+                      size="small"
+                      title={<Text style={{ color: 'var(--text-primary)' }}>模板 {index + 1}</Text>}
+                      extra={
+                        <Space>
+                          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEditTemplate(template)}>
+                            编辑
                           </Button>
-                        </Popconfirm>
+                          <Popconfirm title="确认删除这条模板吗？" onConfirm={() => handleDeleteTemplate(template.id)}>
+                            <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                              删除
+                            </Button>
+                          </Popconfirm>
+                        </Space>
+                      }
+                      style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}
+                    >
+                      <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                        <Text style={{ color: 'var(--text-secondary)' }}>
+                          类型：{templateSubTypeLabel[template.sub_type] || template.sub_type}
+                        </Text>
+                        {template.description ? (
+                          <Paragraph style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>{template.description}</Paragraph>
+                        ) : null}
+                        <Paragraph
+                          style={{ color: 'var(--text-primary)', marginBottom: 0, whiteSpace: 'pre-wrap' }}
+                          ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}
+                        >
+                          {template.content}
+                        </Paragraph>
                       </Space>
-                    }
-                    style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)' }}
-                  >
-                    <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                      <Text style={{ color: 'var(--text-secondary)' }}>
-                        类型：{templateSubTypeLabel[template.sub_type] || template.sub_type}
-                      </Text>
-                      {template.description ? (
-                        <Paragraph style={{ color: 'var(--text-secondary)', marginBottom: 0 }}>{template.description}</Paragraph>
-                      ) : null}
-                      <Paragraph
-                        style={{ color: 'var(--text-primary)', marginBottom: 0, whiteSpace: 'pre-wrap' }}
-                        ellipsis={{ rows: 4, expandable: true, symbol: '展开' }}
-                      >
-                        {template.content}
-                      </Paragraph>
-                    </Space>
-                  </Card>
-                </Col>
-              ))}
-            </Row>
+                    </Card>
+                  </Col>
+                ))}
+              </Row>
+            )}
           </Space>
         )}
       </Modal>

@@ -11,30 +11,21 @@ import (
 	"evaluating_platform/internal/repository"
 )
 
-// AdminHandler 管理员操作处理器
+// AdminHandler exposes administrator-only user management and platform stats APIs.
 type AdminHandler struct {
-	userRepo       *repository.UserRepository
-	assetRepo      *repository.AssetRepository
-	assessmentRepo *repository.AssessmentRepository
-	billingRepo    *repository.BillingRepository
+	userRepo    *repository.UserRepository
+	billingRepo *repository.BillingRepository
 }
 
-// NewAdminHandler 创建管理员处理器
 func NewAdminHandler(
 	userRepo *repository.UserRepository,
-	assetRepo *repository.AssetRepository,
-	assessmentRepo *repository.AssessmentRepository,
 	billingRepo *repository.BillingRepository,
 ) *AdminHandler {
 	return &AdminHandler{
-		userRepo:       userRepo,
-		assetRepo:      assetRepo,
-		assessmentRepo: assessmentRepo,
-		billingRepo:    billingRepo,
+		userRepo:    userRepo,
+		billingRepo: billingRepo,
 	}
 }
-
-// ─── 用户管理 ─────────────────────────────────────────────────────────────────
 
 // ListUsers GET /admin/users?limit&offset&role&keyword
 func (h *AdminHandler) ListUsers(c *gin.Context) {
@@ -60,7 +51,7 @@ func (h *AdminHandler) ListUsers(c *gin.Context) {
 	})
 }
 
-// UpdateUserRole PUT /admin/users/:id/role  body:{role}
+// UpdateUserRole PUT /admin/users/:id/role
 func (h *AdminHandler) UpdateUserRole(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -78,7 +69,7 @@ func (h *AdminHandler) UpdateUserRole(c *gin.Context) {
 
 	role := model.UserRole(body.Role)
 	if role != model.RoleEnterprise && role != model.RoleExpert && role != model.RoleAdmin {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的角色值"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的角色"})
 		return
 	}
 
@@ -90,7 +81,7 @@ func (h *AdminHandler) UpdateUserRole(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "角色已更新"})
 }
 
-// SetUserActive PUT /admin/users/:id/active  body:{active:bool}
+// SetUserActive PUT /admin/users/:id/active
 func (h *AdminHandler) SetUserActive(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -114,68 +105,23 @@ func (h *AdminHandler) SetUserActive(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "用户状态已更新"})
 }
 
-// ─── 资产审核 ─────────────────────────────────────────────────────────────────
-
-// ListPendingAssets GET /admin/assets/pending?limit&offset
-func (h *AdminHandler) ListPendingAssets(c *gin.Context) {
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
-	if limit > 100 {
-		limit = 100
-	}
-
-	assets, total, err := h.assetRepo.ListByStatus(c.Request.Context(), model.AssetStatusTesting, limit, offset)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "查询失败"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"items":  assets,
-		"total":  total,
-		"limit":  limit,
-		"offset": offset,
-	})
-}
-
-// ApproveAsset PUT /admin/assets/:id/approve
-func (h *AdminHandler) ApproveAsset(c *gin.Context) {
+// DeleteUser DELETE /admin/users/:id
+func (h *AdminHandler) DeleteUser(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid asset id"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user id"})
 		return
 	}
-
-	if err := h.assetRepo.AdminApprove(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if currentID, err := uuid.Parse(c.GetString("user_id")); err == nil && currentID == id {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot delete current admin user"})
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "资产已审核通过并发布"})
+	if err := h.userRepo.Delete(c.Request.Context(), id); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "delete user failed: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "user retired"})
 }
-
-// RejectAsset PUT /admin/assets/:id/reject  body:{reason}
-func (h *AdminHandler) RejectAsset(c *gin.Context) {
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid asset id"})
-		return
-	}
-
-	var body struct {
-		Reason string `json:"reason"`
-	}
-	_ = c.ShouldBindJSON(&body)
-
-	if err := h.assetRepo.AdminReject(c.Request.Context(), id); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "资产已驳回", "reason": body.Reason})
-}
-
-// ─── 平台统计 ─────────────────────────────────────────────────────────────────
 
 // GetStats GET /admin/stats
 func (h *AdminHandler) GetStats(c *gin.Context) {
@@ -185,16 +131,6 @@ func (h *AdminHandler) GetStats(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "统计失败"})
 		return
-	}
-
-	pendingAssets, err := h.assetRepo.CountPendingAssets(ctx)
-	if err != nil {
-		pendingAssets = 0
-	}
-
-	totalAssessments, weeklyAssessments, err := h.assessmentRepo.CountStats(ctx)
-	if err != nil {
-		totalAssessments = 0
 	}
 
 	totalRevenue, err := h.billingRepo.SumTotalRevenue(ctx)
@@ -208,11 +144,10 @@ func (h *AdminHandler) GetStats(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"total_users":         totalUsers,
-		"users_by_role":       roleCounts,
-		"total_assessments":   totalAssessments,
-		"pending_assets":      pendingAssets,
-		"total_revenue":       totalRevenue,
-		"weekly_assessments":  weeklyAssessments,
+		"total_users":        totalUsers,
+		"users_by_role":      roleCounts,
+		"total_assessments":  0,
+		"total_revenue":      totalRevenue,
+		"weekly_assessments": []int{},
 	})
 }

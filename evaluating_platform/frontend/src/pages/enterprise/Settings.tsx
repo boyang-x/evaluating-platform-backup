@@ -1,7 +1,5 @@
 import { Card, Typography, Descriptions, Tag } from 'antd'
 import { useAuth } from '../../context/AuthContext'
-import { OrchLLMConfig } from '../../components/OrchLLMConfig'
-import { TargetLLMConfig } from '../../components/TargetLLMConfig'
 
 const { Title, Text } = Typography
 
@@ -51,9 +49,6 @@ export function Settings() {
           </Text>
         </div>
       </Card>
-
-      <OrchLLMConfig />
-      <TargetLLMConfig />
     </div>
   )
 }

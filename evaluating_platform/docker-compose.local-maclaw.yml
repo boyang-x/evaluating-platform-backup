@@ -1,0 +1,21 @@
+services:
+  maclaw-runtime:
+    build:
+      context: ../../maclaw
+      dockerfile: Dockerfile
+    image: "${MACLAW_RUNTIME_IMAGE:-ep-maclawsrv:local}"
+
+  hubcenter:
+    build:
+      context: ../../maclaw
+      dockerfile: Dockerfile.hubcenter
+    image: "${MACLAW_HUBCENTER_IMAGE:-ep-maclaw-hubcenter:local}"
+
+  backend:
+    depends_on:
+      maclaw-runtime:
+        condition: service_healthy
+    environment:
+      MACLAW_RUNTIME_KIND: "maclawsrv"
+      MACLAW_RUNTIME_MODE: "${MACLAW_RUNTIME_MODE:-local-build}"
+      MACLAW_BASE_URL: "http://maclaw-runtime:18080"

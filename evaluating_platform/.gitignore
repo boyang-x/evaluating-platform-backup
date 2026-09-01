@@ -19,14 +19,27 @@ vendor/
 
 # 日志
 *.log
+*.pyc
 logs/
+__pycache__/
+**/__pycache__/
 
 # 构建产物
 dist/
 frontend/dist/
 frontend/node_modules/
+.tmp/
+artifacts/
 
 # 数据卷（Docker）
 postgres_data/
 redis_data/
 minio_data/
+maclaw_data/
+minio-export/
+frontend/output/
+output/
+*.dump
+*.zip
+*.tar
+*.tar.gz

@@ -17,13 +17,24 @@ Thumbs.db
 *.tmp
 *.out
 *.test
+*.pyc
+__pycache__/
+**/__pycache__/
 
 node_modules/
 dist/
 tmp/
+output/
+artifacts/
+.tmp/
+_tmp*/
+_tmp*.json
 **/node_modules/
 **/dist/
 **/tmp/
+**/output/
+**/artifacts/
+**/.tmp/
 
 postgres_data/
 redis_data/
@@ -31,3 +42,15 @@ minio_data/
 **/postgres_data/
 **/redis_data/
 **/minio_data/
+**/maclaw_data/
+
+frontend/output/
+**/frontend/output/
+minio-export/
+**/minio-export/
+ppt_assets/
+**/ppt_assets/
+*.dump
+*.zip
+*.tar
+*.tar.gz

@@ -5,7 +5,7 @@ server:
 llm:
   provider: openai
   base_url: "https://api.deepseek.com/v1"
-  api_key: "sk-214a3439fe2944c3b816a4734c07f88b"
+  api_key: "${LLM_API_KEY}"
   model: "deepseek-chat"
   max_tokens: 4096
   temperature: 0.7
@@ -30,7 +30,7 @@ storage:
 
 agent:
   max_iterations: 20
-  timeout_seconds: 300
+  timeout_seconds: 360
   tool_timeout_seconds: 15
 
 auth:

@@ -1,4 +1,40 @@
-﻿import api from './api'
+import api from './api'
+
+export interface MaclawMCPToolSummary {
+  name: string
+  description?: string
+  input_schema?: Record<string, unknown>
+}
+
+export interface MaclawMCPServerSummary {
+  id: string
+  kind: string
+  name: string
+  endpoint_url?: string
+  auth_type?: string
+  has_auth_secret?: boolean
+  header_names?: string[]
+  disabled?: boolean
+  auto_start?: boolean
+  source?: string
+  running?: boolean
+  health_status?: string
+  fail_count?: number
+  last_check_at?: string
+  created_at?: string
+  tools?: MaclawMCPToolSummary[]
+}
+
+export interface MaclawMCPServerInput {
+  kind?: 'remote'
+  name: string
+  endpoint_url: string
+  auth_type?: string
+  auth_secret?: string
+  headers?: Record<string, string>
+  disabled?: boolean
+  auto_start?: boolean
+}
 
 export const expertService = {
   getCategories: () => api.get('/tools/categories').then((r) => r.data),
@@ -29,59 +65,6 @@ export const expertService = {
   previewComposedAttack: (id: string, limit?: number) =>
     api.get(`/composed-attacks/${id}/preview`, { params: { limit } }).then((r) => r.data),
 
-  listExternalMCPServers: () =>
-    api.get('/external-mcp-servers').then((r) => r.data),
-
-  createExternalMCPServer: (data: {
-    name: string
-    namespace?: string
-    description?: string
-    base_url: string
-    transport_type?: string
-    auth_type?: string
-    auth_key?: string
-    auth_header?: string
-    auth_prefix?: string
-    upstream_base_url?: string
-    upstream_api_key?: string
-    upstream_model?: string
-    upstream_timeout_seconds?: number
-    timeout_seconds?: number
-    enabled?: boolean
-    skill_prompt?: string
-  }) => api.post('/external-mcp-servers', data).then((r) => r.data),
-
-  updateExternalMCPServer: (id: string, data: {
-    name: string
-    namespace?: string
-    description?: string
-    base_url: string
-    transport_type?: string
-    auth_type?: string
-    auth_key?: string
-    auth_header?: string
-    auth_prefix?: string
-    upstream_base_url?: string
-    upstream_api_key?: string
-    upstream_model?: string
-    upstream_timeout_seconds?: number
-    timeout_seconds?: number
-    enabled?: boolean
-    skill_prompt?: string
-  }) => api.put(`/external-mcp-servers/${id}`, data).then((r) => r.data),
-
-  deleteExternalMCPServer: (id: string) =>
-    api.delete(`/external-mcp-servers/${id}`).then((r) => r.data),
-
-  testExternalMCPServer: (id: string) =>
-    api.post(`/external-mcp-servers/${id}/test`).then((r) => r.data),
-
-  syncExternalMCPServer: (id: string) =>
-    api.post(`/external-mcp-servers/${id}/sync`).then((r) => r.data),
-
-  listExternalMCPTools: (id: string) =>
-    api.get(`/external-mcp-servers/${id}/tools`).then((r) => r.data),
-
   createTemplate: (data: {
     sub_type: string
     name: string
@@ -111,40 +94,61 @@ export const expertService = {
   listEvalPackages: (params?: { limit?: number; offset?: number }) =>
     api.get('/eval-packages', { params }).then((r) => r.data),
 
-  getAuxLLMConfig: () => api.get('/auxiliary-llm/config').then((r) => r.data),
+  listMaclawSkills: (limit = 100) =>
+    api.get('/maclaw/skills', { params: { limit } }).then((r) => r.data),
 
-  updateAuxLLMConfig: (data: { base_url: string; api_key: string; model?: string }) =>
-    api.put('/auxiliary-llm/config', data).then((r) => r.data),
+  searchMaclawSkills: (data: {
+    query: string
+    sources?: string[]
+    top_n?: number
+    skill_hub_url?: string
+    skill_market_url?: string
+    github_token?: string
+    include_installed?: boolean
+  }) => api.post('/maclaw/skills/search', data).then((r) => r.data),
 
-  testAuxLLMConnection: (data: { base_url: string; api_key: string; model?: string }) =>
-    api.post('/auxiliary-llm/test', data).then((r) => r.data),
+  importMaclawSkill: (data: {
+    zip_base64: string
+    overwrite?: boolean
+    archive_name?: string
+  }) => api.post('/maclaw/skills/import', data).then((r) => r.data),
 
-  createDetector: (data: {
-    name: string
-    sub_type: string
-    description?: string
-    target_config: { type: string; base_url: string; api_key: string; model?: string; app_id?: string }
-    sample_ids?: string[]
-    template_ids?: string[]
-    package_ids?: string[]
-  }) => api.post('/detectors', data).then((r) => r.data),
+  installMaclawSkill: (data: {
+    source: string
+    repo_url?: string
+    raw_url?: string
+    repo_full_name?: string
+    file_path?: string
+    branch?: string
+    definition_type?: string
+    zip_base64?: string
+    skill_hub_url?: string
+    skill_id?: string
+    overwrite?: boolean
+    github_token?: string
+  }) => api.post('/maclaw/skills/install', data).then((r) => r.data),
 
-  listDetectors: (params?: { limit?: number; offset?: number }) =>
-    api.get('/detectors', { params }).then((r) => r.data),
+  listMaclawMCPServers: (limit = 100) =>
+    api.get<{ items: MaclawMCPServerSummary[] }>('/maclaw/mcp/servers', { params: { limit } }).then((r) => r.data),
 
-  getDetector: (id: string) => api.get(`/detectors/${id}`).then((r) => r.data),
+  createMaclawMCPServer: (data: MaclawMCPServerInput) =>
+    api.post<MaclawMCPServerSummary>('/maclaw/mcp/servers', data).then((r) => r.data),
 
-  updateDetector: (id: string, data: {
-    name: string
-    sub_type: string
-    description?: string
-    target_config: { type: string; base_url: string; api_key: string; model?: string; app_id?: string }
-    sample_ids?: string[]
-    template_ids?: string[]
-    package_ids?: string[]
-  }) => api.put(`/detectors/${id}`, data).then((r) => r.data),
+  updateMaclawMCPServer: (id: string, data: MaclawMCPServerInput) =>
+    api.patch<MaclawMCPServerSummary>(`/maclaw/mcp/servers/${encodeURIComponent(id)}`, data).then((r) => r.data),
 
-  deleteDetector: (id: string) => api.delete(`/detectors/${id}`).then((r) => r.data),
+  deleteMaclawMCPServer: (id: string) =>
+    api.delete(`/maclaw/mcp/servers/${encodeURIComponent(id)}`).then((r) => r.data),
 
-  runDetector: (id: string) => api.post(`/detectors/${id}/run`).then((r) => r.data),
+  startMaclawMCPServer: (id: string) =>
+    api.post<MaclawMCPServerSummary>(`/maclaw/mcp/servers/${encodeURIComponent(id)}/start`).then((r) => r.data),
+
+  stopMaclawMCPServer: (id: string) =>
+    api.post<MaclawMCPServerSummary>(`/maclaw/mcp/servers/${encodeURIComponent(id)}/stop`).then((r) => r.data),
+
+  healthCheckMaclawMCPServer: (id: string) =>
+    api.post<MaclawMCPServerSummary>(`/maclaw/mcp/servers/${encodeURIComponent(id)}/health-check`).then((r) => r.data),
+
+  listMaclawMCPServerTools: (id: string) =>
+    api.get<{ items: MaclawMCPToolSummary[] }>(`/maclaw/mcp/servers/${encodeURIComponent(id)}/tools`).then((r) => r.data),
 }

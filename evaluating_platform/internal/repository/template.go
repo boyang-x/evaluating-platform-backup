@@ -153,17 +153,7 @@ func (r *TemplateRepository) ListByExpert(ctx context.Context, expertID uuid.UUI
 }
 
 func (r *TemplateRepository) ListPublished(ctx context.Context, subType string, limit, offset int) ([]model.Template, int, error) {
-	conds := []string{}
-	args := []interface{}{}
-
-	if subType != "" {
-		args = append(args, subType)
-		conds = append(conds, fmt.Sprintf("sub_type = $%d", len(args)))
-	}
-	where := ""
-	if len(conds) > 0 {
-		where = "WHERE " + strings.Join(conds, " AND ")
-	}
+	where, args := platformDataPublishedWhereClause("sub_type", subType, 0)
 
 	var total int
 	if err := r.pool.QueryRow(ctx, "SELECT COUNT(*) FROM templates "+where, args...).Scan(&total); err != nil {

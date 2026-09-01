@@ -2,25 +2,21 @@
 import { Layout, Menu, Typography, Avatar, Dropdown, Badge } from 'antd'
 import { useEffect, useState } from 'react'
 import {
-  AppstoreOutlined,
-  ApiOutlined,
-  FileTextOutlined,
+  CodeOutlined,
   LogoutOutlined,
   UserOutlined,
   BellOutlined,
-  SafetyOutlined,
-  ShopOutlined,
   ExperimentOutlined,
   RocketOutlined,
+  ApiOutlined,
 } from '@ant-design/icons'
-import { WorkflowEditor } from './WorkflowEditor'
-import { AssetMarket } from './AssetMarket'
-import { MyAssets } from './MyAssets'
 import { SampleManager } from './SampleManager'
 import { EngineManager } from './EngineManager'
-import { ExternalMCPManager } from './ExternalMCPManager'
+import { MaclawSkillManager } from './MaclawSkillManager'
+import { MaclawMCPServerManager } from './MaclawMCPServerManager'
 import { useAuth } from '../../context/AuthContext'
 import { billingService } from '../../services/billing'
+import appLogoUrl from '../../assets/qianxin-ai-security-logo.png'
 
 const { Sider, Header, Content } = Layout
 const { Text } = Typography
@@ -28,10 +24,8 @@ const { Text } = Typography
 const menuItems = [
   { key: '/expert/samples', icon: <ExperimentOutlined />, label: '样本管理' },
   { key: '/expert/engine', icon: <RocketOutlined />, label: '引擎管理' },
-  { key: '/expert/mcp-services', icon: <ApiOutlined />, label: 'MCP 服务' },
-  { key: '/expert/workflow', icon: <AppstoreOutlined />, label: '工作流编排' },
-  { key: '/expert/assets', icon: <FileTextOutlined />, label: '我的资产' },
-  { key: '/expert/market', icon: <ShopOutlined />, label: '资产市场' },
+  { key: '/expert/skills', icon: <CodeOutlined />, label: 'Skill 管理' },
+  { key: '/expert/mcp', icon: <ApiOutlined />, label: 'MCP 服务' },
 ]
 
 export function ExpertPortal() {
@@ -70,17 +64,21 @@ export function ExpertPortal() {
         >
           <div
             style={{
-              width: 32,
-              height: 32,
-              borderRadius: 8,
-              background: 'rgba(255, 122, 69, 0.15)',
-              border: '1px solid rgba(255, 122, 69, 0.4)',
+              width: 42,
+              height: 42,
+              borderRadius: '50%',
+              background: 'transparent',
+              overflow: 'hidden',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
             }}
           >
-            <SafetyOutlined style={{ color: '#ff7a45', fontSize: 16 }} />
+            <img
+              src={appLogoUrl}
+              alt="Qianxin China-ASEAN AI Security Research Institute"
+              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+            />
           </div>
           <div>
             <div style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: 14, lineHeight: 1.2 }}>
@@ -173,10 +171,8 @@ export function ExpertPortal() {
           <Routes>
             <Route path="samples" element={<SampleManager />} />
             <Route path="engine" element={<EngineManager />} />
-            <Route path="mcp-services" element={<ExternalMCPManager />} />
-            <Route path="workflow" element={<WorkflowEditor />} />
-            <Route path="assets" element={<MyAssets />} />
-            <Route path="market" element={<AssetMarket />} />
+            <Route path="skills" element={<MaclawSkillManager />} />
+            <Route path="mcp" element={<MaclawMCPServerManager />} />
             <Route path="*" element={<SampleManager />} />
           </Routes>
         </Content>

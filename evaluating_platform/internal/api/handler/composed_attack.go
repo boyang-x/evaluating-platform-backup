@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"io"
 	"net/http"
 	"strconv"
 
@@ -41,8 +40,18 @@ func (h *ComposedAttackHandler) Upload(c *gin.Context) {
 	name := c.PostForm("name")
 	description := c.PostForm("description")
 
-	if subType == "" || name == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "sub_type and name are required"})
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		return
+	}
+	if subType == "" {
+		subType = "ready_to_run"
+	}
+	if h.manager == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"code":  "composed_attack_storage_unavailable",
+			"error": "composed attack storage is unavailable, please retry after the storage service is ready",
+		})
 		return
 	}
 
@@ -53,9 +62,9 @@ func (h *ComposedAttackHandler) Upload(c *gin.Context) {
 	}
 	defer file.Close()
 
-	csvData, err := io.ReadAll(file)
+	csvData, err := readLimitedUpload(file, maxExpertDataUploadBytes)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "read file failed"})
+		writeUploadReadError(c, err)
 		return
 	}
 
@@ -112,7 +121,7 @@ func (h *ComposedAttackHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	if storagePath != "" {
+	if storagePath != "" && h.store != nil {
 		_ = h.store.Delete(c.Request.Context(), storagePath)
 	}
 
@@ -129,6 +138,13 @@ func (h *ComposedAttackHandler) Preview(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	if limit <= 0 {
 		limit = 20
+	}
+	if h.loader == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"code":  "composed_attack_storage_unavailable",
+			"error": "composed attack storage is unavailable, please retry after the storage service is ready",
+		})
+		return
 	}
 
 	payloads, err := h.loader.Preview(c.Request.Context(), id, limit)

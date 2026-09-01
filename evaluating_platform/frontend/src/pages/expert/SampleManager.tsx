@@ -42,11 +42,39 @@ interface Payload {
   data: string
 }
 
+const sampleTypeOptions = [
+  { value: 'prompt_injection', label: '提示注入' },
+  { value: 'jailbreak_question', label: '越狱问题' },
+  { value: 'harmful_content', label: '有害内容请求' },
+  { value: 'privacy_sensitive', label: '隐私/敏感信息' },
+  { value: 'fraud_social_engineering', label: '欺诈/社工' },
+  { value: 'cyber_abuse', label: '网络安全滥用' },
+  { value: 'bias_discrimination', label: '偏见歧视' },
+  { value: 'tool_abuse', label: '工具越权' },
+  { value: 'compliance_boundary', label: '合规边界' },
+]
+
+const legacySubTypeLabel: Record<string, string> = {
+  direct_injection: '提示注入（历史）',
+  malicious_instruction: '有害指令（历史）',
+  compliance_detection: '合规边界（历史）',
+  malicious_poisoning: '恶意投毒（历史，不建议新增）',
+}
+
 const subTypeLabel: Record<string, string> = {
-  direct_injection: '直接注入',
-  malicious_instruction: '恶意指令',
-  compliance_detection: '合规检测',
-  malicious_poisoning: '恶意投毒',
+  ...Object.fromEntries(sampleTypeOptions.map((option) => [option.value, option.label])),
+  ...legacySubTypeLabel,
+}
+
+function buildSampleFilterOptions(samples: SampleRecord[]) {
+  const known = new Set(sampleTypeOptions.map((option) => option.value))
+  const extraOptions = samples
+    .map((sample) => sample.sub_type)
+    .filter((value) => value && !known.has(value))
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .map((value) => ({ value, label: subTypeLabel[value] || value }))
+
+  return [{ value: '', label: '全部类型' }, ...sampleTypeOptions, ...extraOptions]
 }
 
 function formatDate(value?: string) {
@@ -144,7 +172,7 @@ export function SampleManager() {
             攻击样本管理
           </Title>
           <Text style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
-            一张卡片代表一份上传样本集，方便和模板集合保持统一的管理样式。
+            样本是原始测试问题，可按风险场景分类，后续由模板或工具组合成正式攻击载荷。
           </Text>
         </div>
         <Space>
@@ -152,10 +180,7 @@ export function SampleManager() {
             value={filterType}
             onChange={setFilterType}
             style={{ width: 160 }}
-            options={[
-              { value: '', label: '全部类型' },
-              ...Object.entries(subTypeLabel).map(([value, label]) => ({ value, label })),
-            ]}
+            options={buildSampleFilterOptions(samples)}
           />
           <Button type="primary" icon={<UploadOutlined />} onClick={() => setShowUpload(true)}>
             上传样本集
@@ -232,10 +257,10 @@ export function SampleManager() {
       >
         <Form form={form} layout="vertical">
           <Form.Item name="sub_type" label="样本类型" rules={[{ required: true, message: '请选择样本类型' }]}> 
-            <Select options={Object.entries(subTypeLabel).map(([value, label]) => ({ value, label }))} />
+            <Select options={sampleTypeOptions} />
           </Form.Item>
           <Form.Item name="name" label="样本集名称" rules={[{ required: true, message: '请输入样本集名称' }]}> 
-            <Input placeholder="如：内容合规检测样本集" />
+            <Input placeholder="如：提示注入基础样本集" />
           </Form.Item>
           <Form.Item name="description" label="描述">
             <TextArea rows={2} placeholder="简要描述样本内容" />

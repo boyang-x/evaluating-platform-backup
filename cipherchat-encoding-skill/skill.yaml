@@ -1,0 +1,28 @@
+name: cipherchat-encoding-skill
+description: Generate CipherChat-inspired encoded and non-natural-language safety-evaluation payloads using reversible ciphers, Base64, Morse, leetspeak, and Unicode perturbations.
+version: "1.1.0"
+triggers:
+  - CipherChat
+  - cipher jailbreak
+  - encoding attack
+  - non-natural language jailbreak
+status: active
+type: executable
+mode: sequential
+global_timeout: 120
+platforms:
+  - universal
+produces_artifact: true
+params:
+  - name: input
+    description: JSON input path containing expert samples, sample questions, composed attacks, rewrite_request, or target goal.
+    required: false
+    default: examples/input.json
+  - name: output
+    description: JSON output path for the generated payload_dataset.
+    required: false
+    default: output.json
+steps:
+  - action: run
+    params:
+      command: python3 runtime/main.py --input {{input}} --output {{output}}

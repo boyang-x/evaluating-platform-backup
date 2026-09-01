@@ -1,5 +1,4 @@
 services:
-  # ── PostgreSQL ─────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     container_name: ep_postgres
@@ -12,14 +11,12 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d   # 首次启动自动执行迁移
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  # ── Redis ──────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: ep_redis
@@ -35,7 +32,6 @@ services:
       timeout: 3s
       retries: 5
 
-  # ── MinIO (S3-compatible 文件存储) ─────────────────────────
   minio:
     image: minio/minio:latest
     container_name: ep_minio
@@ -45,8 +41,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin123
     ports:
-      - "9000:9000"   # S3 API
-      - "9001:9001"   # Web 控制台
+      - "9000:9000"
+      - "9001:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -55,7 +51,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # ── MinIO 初始化（创建 Bucket）────────────────────────────
   minio-init:
     image: minio/mc:latest
     container_name: ep_minio_init
@@ -70,7 +65,48 @@ services:
       "
     restart: "no"
 
-  # ── 评估平台后端 ───────────────────────────────────────────
+  maclaw-runtime:
+    image: "${MACLAW_RUNTIME_IMAGE:-maclaw-runtime:latest}"
+    container_name: ep_maclaw_runtime
+    restart: unless-stopped
+    environment:
+      MACLAW_DATA_ROOT: /data/maclaw
+      MACLAW_HTTP_ADDR: 0.0.0.0:18080
+      MACLAW_ALLOW_INSECURE_HTTP: "true"
+      MACLAW_ADMIN_SECRET: "${MACLAW_ADMIN_SECRET:-ep-local-maclaw-admin-secret-change-me}"
+      MACLAW_TOKEN_SECRET: "${MACLAW_TOKEN_SECRET:-ep-local-maclaw-token-secret-change-me-32chars}"
+      MACLAW_CREDENTIAL_PEPPER: "${MACLAW_CREDENTIAL_PEPPER:-ep-local-maclaw-pepper}"
+      MACLAW_SECURITY_POLICY_MODE: "${MACLAW_SECURITY_POLICY_MODE:-developer}"
+      MACLAW_HTTP_WRITE_TIMEOUT_SECONDS: "${MACLAW_HTTP_WRITE_TIMEOUT_SECONDS:-600}"
+      MACLAW_REMOTE_MCP_TOOL_TIMEOUT_SECONDS: "${MACLAW_REMOTE_MCP_TOOL_TIMEOUT_SECONDS:-650}"
+      MACLAW_REDTEAM_SKILL_BATCH_SIZE: "${MACLAW_REDTEAM_SKILL_BATCH_SIZE:-}"
+      MACLAW_REDTEAM_SKILL_BATCH_CONCURRENCY: "${MACLAW_REDTEAM_SKILL_BATCH_CONCURRENCY:-}"
+    expose:
+      - "18080"
+    volumes:
+      - maclaw_data:/data/maclaw
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:18080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  hubcenter:
+    image: "${MACLAW_HUBCENTER_IMAGE:-maclaw-hubcenter:latest}"
+    container_name: ep_hubcenter
+    restart: unless-stopped
+    command: ["--config", "/app/configs/maclaw-hubcenter.yaml"]
+    ports:
+      - "9388:9388"
+    volumes:
+      - hubcenter_data:/data/hubcenter
+      - ./configs/maclaw-hubcenter.yaml:/app/configs/maclaw-hubcenter.yaml:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9388/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: .
@@ -82,17 +118,34 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      maclaw-runtime:
+        condition: service_healthy
+      hubcenter:
+        condition: service_healthy
     environment:
       LLM_API_KEY: "${LLM_API_KEY}"
       LLM_BASE_URL: "${LLM_BASE_URL:-https://api.deepseek.com/v1}"
       LLM_MODEL: "${LLM_MODEL:-deepseek-chat}"
       JWT_SECRET: "${JWT_SECRET:-change-me-in-dev}"
+      CRYPTO_MASTER_KEY: "${CRYPTO_MASTER_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}"
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin123
       GIN_MODE: debug
       DATABASE_DSN: "host=postgres user=postgres password=postgres dbname=evaluating_platform port=5432 sslmode=disable"
       REDIS_ADDR: "redis:6379"
       STORAGE_ENDPOINT: "minio:9000"
+      MACLAW_BASE_URL: "${MACLAW_BASE_URL:-http://maclaw-runtime:18080}"
+      MACLAW_RUNTIME_KIND: "${MACLAW_RUNTIME_KIND:-maclawsrv}"
+      MACLAW_RUNTIME_MODE: "${MACLAW_RUNTIME_MODE:-compose}"
+      MACLAW_CAPABILITY_PROFILE: "${MACLAW_CAPABILITY_PROFILE:-shadow}"
+      MACLAW_TIMEOUT_SECONDS: "${MACLAW_TIMEOUT_SECONDS:-360}"
+      MACLAW_ADMIN_SECRET: "${MACLAW_ADMIN_SECRET:-ep-local-maclaw-admin-secret-change-me}"
+      MACLAW_PROVISIONING_ENABLED: "true"
+      MACLAW_REDTEAM_MCP_ENDPOINT: "${MACLAW_REDTEAM_MCP_ENDPOINT:-http://backend:8080/api/v1/internal/maclaw/redteam-mcp}"
+      MACLAW_REDTEAM_MCP_SECRET: "${MACLAW_REDTEAM_MCP_SECRET:-ep-local-redteam-mcp-secret-change-me}"
+      MACLAW_REDTEAM_TARGET_CONCURRENCY: "${MACLAW_REDTEAM_TARGET_CONCURRENCY:-5}"
+      MACLAW_REDTEAM_TARGET_MAX_TOKENS: "${MACLAW_REDTEAM_TARGET_MAX_TOKENS:-512}"
+      MACLAW_REDTEAM_JUDGE_MAX_TOKENS: "${MACLAW_REDTEAM_JUDGE_MAX_TOKENS:-1024}"
     ports:
       - "8080:8080"
     volumes:
@@ -104,47 +157,25 @@ services:
       timeout: 5s
       retries: 3
 
-  # ── 前端开发服务器 ─────────────────────────────────────────
-  ccbos_mcp:
-    build:
-      context: ../CC-BOS/mcp-server
-      dockerfile: Dockerfile
-    container_name: ep_ccbos_mcp
-    restart: unless-stopped
-    environment:
-      CCBOS_MCP_PORT: 18191
-      CCBOS_LISTEN_HOST: 0.0.0.0
-      CCBOS_PUBLIC_BASE_URL: http://ccbos_mcp:18191
-      CCBOS_API_BASE_URL: "${CCBOS_API_BASE_URL:-https://api.deepseek.com/v1}"
-      CCBOS_API_KEY: "${CCBOS_API_KEY:-}"
-      CCBOS_MODEL: "${CCBOS_MODEL:-deepseek-chat}"
-      CCBOS_REQUEST_TIMEOUT_SECONDS: "${CCBOS_REQUEST_TIMEOUT_SECONDS:-60}"
-      CCBOS_ARTIFACT_DIR: /app/artifacts
-    ports:
-      - "18191:18191"
-    volumes:
-      - ../CC-BOS/mcp-server/artifacts:/app/artifacts
-
   frontend:
-    image: node:22-alpine
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: evaluating_platform-frontend:latest
     container_name: ep_frontend
     restart: unless-stopped
-    working_dir: /app
     depends_on:
       backend:
         condition: service_healthy
-    environment:
-      VITE_API_URL: "http://backend:8080"
     ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
-    command: sh -c "npm install && npm run dev"
+      - "5173:80"
 
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  maclaw_data:
+  hubcenter_data:
 
 networks:
   default:
